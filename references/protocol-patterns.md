@@ -14,7 +14,7 @@ Protocol-specific reference for building Dune queries against the two largest Su
 
 ## The mementomori Mislabel Investigation
 
-Before doing any Navi or Suilend work on Dune, **be aware of this**: the most-cited "Navi Protocol" dashboard on Dune ([dune.com/mementomori7777/navi-protocol-full-dashboard](https://dune.com/mementomori7777/navi-protocol-full-dashboard), ~50K views, 19 charts, maintained by Prudentia Labs) is actually querying **Suilend's** event package the entire time.
+Before doing any Navi or Suilend work on Dune, **be aware of this**: the most-cited "Navi Protocol" reference dashboard on Dune ([Prudentia Labs' dashboard](https://dune.com/mementomori7777/navi-protocol-full-dashboard), 19 charts) queries **Suilend's** event package, not Navi's.
 
 Evidence: the core query points at `0xf95b06141ed4a174f239417323bde3f209b972f5930d8521ea38a52aff3a6ddf::reserve::ReserveAssetDataEvent`. Triple-confirmed:
 - Suilend SDK docs reference this exact package as Suilend's main pool
@@ -24,10 +24,12 @@ Evidence: the core query points at `0xf95b06141ed4a174f239417323bde3f209b972f593
 
 Real Navi packages are `0x1e4a13a0...` (events) and `0xd899cf7d...` (legacy storage type). The `0xf95b06141...` package has nothing to do with Navi.
 
+This isn't a criticism of the Prudentia team — it's a reminder of how easily one wrong package hex can propagate as a canonical reference on Sui, where there are no curated protocol tables to anchor identity.
+
 **Practical implications:**
 - When asked to "build a Navi dashboard," verify the package hexes before using any reference SQL
 - When asked to "improve / clone / fix" the mementomori dashboard, the right answer is often "rebuild it correctly because it's a different protocol"
-- This mislabel is a strong differentiation hook — calling it out demonstrates investigative rigor
+- This finding is a useful pedagogical example of why package-identity verification matters on Sui
 
 ## Suilend Overview & Patterns
 

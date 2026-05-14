@@ -18,14 +18,14 @@ Determine which mode applies based on the user's request:
 3. **Optimize** — User has a working but slow/expensive query → improve performance
 4. **Investigate** — User mentions a public Dune dashboard or query and wants to understand or differentiate from it → reverse-engineer + audit
 
-Mode 4 deserves special attention. The most-cited "Navi Protocol" dashboard on Dune (mementomori7777, ~50K views, 19 charts) was actually querying **Suilend's** event package the whole time — a mislabel hiding in plain sight. Always reverse-engineer cited reference dashboards before competing with them; the package hexes will tell you which protocol the queries actually cover.
+Mode 4 deserves special attention. The most-cited "Navi Protocol" reference dashboard on Dune (Prudentia Labs / mementomori7777, 19 charts) queries **Suilend's** event package, not Navi's — a useful pedagogical example of why package-identity verification matters on Sui. Always reverse-engineer cited reference dashboards before competing with or building on top of them; the package hexes will tell you which protocol the queries actually cover.
 
 ## Build Mode
 
 When the user asks for a new query:
 
 1. **Clarify the goal** if ambiguous (e.g., "Do you mean unique depositors or deposit events? Cumulative supply or net flow? Snapshot today or time-series?"). Restate the goal before writing SQL.
-2. **Pick the right data source.** Sui has *no decoded protocol tables* like EVM. Decide between:
+2. **Pick the right data source.** Sui has *no decoded protocol tables on Dune for lending or most DeFi domains* — Dune's curated `lending.*` covers 15 EVM chains only, and `dex.trades` covers EVM + Solana. A `dex_sui.trades` table exists in the data explorer but isn't documented in the official catalog (as of May 2026) — verify before relying. For lending and most protocol-specific Sui analytics, decide between:
    - `sui.events` — flows and actions emitted by `event::emit`
    - `sui.objects` — historical state changes per object-version
    - `sui.move_call` — cheap function-call counting
@@ -102,7 +102,7 @@ DuneSQL is a Trino fork. Sui-specific quirks on top of standard Trino:
 
 ### LiveFetch — pulling live data inside SQL
 
-Dune supports `http_get` and `http_post` directly inside SQL. **This is a game-changer for Sui because there are no decoded protocol tables.** When TVL, current rates, or current asset metadata matter more than historical replay, you can call Sui RPC nodes from within the query and refresh on every execution.
+Dune supports `http_get` and `http_post` directly inside SQL. **This is a game-changer for Sui lending and most DeFi protocols because Dune's curated tables don't yet cover them.** When TVL, current rates, or current asset metadata matter more than historical replay, you can call Sui RPC nodes from within the query and refresh on every execution.
 
 ```sql
 -- Single Sui RPC call inside SQL

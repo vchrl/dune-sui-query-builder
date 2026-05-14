@@ -34,6 +34,7 @@ Initial public release.
 ## Roadmap
 
 ### [0.2.0] — planned
+- **Audit emerging Sui curated tables** — `dex_sui.trades`, `sui_walrus.*`, `sui_daily.*`, `sui_tvl.*`. Document schemas, coverage, freshness, and integration patterns with raw `sui.events` work.
 - **Pure-Pyth pricing** replacing the `prices.hour` + Pyth hybrid for the Navi pipeline (discover feed IDs from Navi's on-chain oracle registry, batch in one Hermes call, add confidence intervals + EMA prices)
 - **Historical Navi TVL** via `sui_tryGetPastObject` — date → checkpoint → object version mapping
 - **Cetus protocol patterns** — concentrated liquidity DEX schemas
