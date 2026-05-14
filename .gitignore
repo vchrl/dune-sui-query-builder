@@ -1,0 +1,22 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python (in case eval suite gets added later)
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Skill packaging artifacts
+*.zip
+*.skill
+dist/
