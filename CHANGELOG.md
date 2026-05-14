@@ -6,12 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [0.1.2] — 2026-05-14
+
+Filename clarity: rename `references/sui-dex-patterns.md` → `references/sui-curated-tables.md`. Content unchanged.
+
+### Changed
+- Renamed `references/sui-dex-patterns.md` → `references/sui-curated-tables.md`. The file documents 5 curated Sui spell tables (`dex_sui.trades`, `sui_tvl.btc_ecosystem`, `sui_daily.stats`, `sui_walrus.base_table`, `cex.addresses`) — only one of which is DEX. The original filename implied DEX-only scope, which was misleading (Walrus inside a file named `dex-patterns` is confusing).
+- Updated 5 internal cross-references: README.md file tree, SKILL.md opening guidance + Build mode routing, `references/sui-data-model.md` cross-reference, and 2 mentions in this changelog's v0.1.1 entry.
+
+---
+
 ## [0.1.1] — 2026-05-14
 
 DEX coverage and curated-table audit, with spellbook source review.
 
 ### Added
-- `references/sui-dex-patterns.md` — new reference covering the 5 curated Sui spell tables (`dex_sui.trades`, `sui_tvl.btc_ecosystem`, `sui_daily.stats`, `sui_walrus.base_table`, `cex.addresses`), plus the `sui_tvl.*_gold` intermediates
+- `references/sui-curated-tables.md` (renamed from `sui-dex-patterns.md` in v0.1.2) — new reference covering the 5 curated Sui spell tables (`dex_sui.trades`, `sui_tvl.btc_ecosystem`, `sui_daily.stats`, `sui_walrus.base_table`, `cex.addresses`), plus the `sui_tvl.*_gold` intermediates
 - Schema for `dex_sui.trades` (28 columns) and full project list (9 DEXs since Sui mainnet launch)
 - Schema for `sui_tvl.btc_ecosystem` (29 columns)
 - **Verified schema for `sui_tvl.lending_pools_gold` via probe query**: 10 columns, all BTC-denominated
@@ -24,7 +34,7 @@ DEX coverage and curated-table audit, with spellbook source review.
 - README hook reframed: now leads with what *does* exist for Sui (5 spell tables), then explains where raw events are still required
 - README "How this fits with Dune's tooling" table expanded — 7 domains with explicit verified coverage status; Sui lending row now reflects partial BTC-only coverage rather than "none"
 - README V0.1 limitations updated: precise wording around BTC-only gold layer + bronze tables existing
-- SKILL.md routing: DEX/BTCfi/Walrus/chain-stats queries now route to `sui-dex-patterns.md` first
+- SKILL.md routing: DEX/BTCfi/Walrus/chain-stats queries now route to `sui-curated-tables.md` first (renamed from `sui-dex-patterns.md` in v0.1.2)
 - `sui-data-model.md` opening: documents all 5 curated tables explicitly instead of scoping vaguely
 
 ### Investigation

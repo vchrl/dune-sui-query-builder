@@ -2,7 +2,7 @@
 
 An [agent skill](https://agentskills.io/) for building, debugging, and optimizing **DuneSQL** queries against **Sui** blockchain data — chained Sui RPC and Pyth Hermes patterns that go beyond what indexed tables alone can deliver. Works with Claude, Cursor, OpenCode, Codex, Gemini CLI, and any agent-skill-compatible tool.
 
-![status](https://img.shields.io/badge/status-v0.1.1%20experimental-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![sui](https://img.shields.io/badge/chain-Sui-4DA2FF) ![dune](https://img.shields.io/badge/engine-DuneSQL-F26DB6)
+![status](https://img.shields.io/badge/status-v0.1.2%20experimental-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![sui](https://img.shields.io/badge/chain-Sui-4DA2FF) ![dune](https://img.shields.io/badge/engine-DuneSQL-F26DB6)
 
 ---
 
@@ -91,7 +91,7 @@ dune-sui-query-builder/
 ├── references/
 │   ├── sui-data-model.md          Dune Sui table catalog · 8 edge cases ·
 │   │                              LiveFetch · Pyth Hermes · anti-patterns
-│   ├── sui-dex-patterns.md        Curated Sui spell tables · dex_sui.trades schema ·
+│   ├── sui-curated-tables.md      Curated Sui spell tables · dex_sui.trades schema ·
 │   │                              BTCfi, daily stats, Walrus · when to use curated vs raw
 │   └── protocol-patterns.md       Navi 3-package archaeology · Suilend schemas ·
 │                                  the V8 4-stage pipeline · comparative analysis
