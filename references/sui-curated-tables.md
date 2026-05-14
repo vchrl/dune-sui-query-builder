@@ -1,4 +1,4 @@
-# Sui DEX & Curated Spell Tables on Dune
+# Sui Curated Spell Tables on Dune
 
 Reference for Sui-specific **curated spell tables** maintained by Dune. These are the entry points to use *before* falling back to raw `sui.events` archaeology — when a curated table covers your need, it's dramatically simpler and cheaper.
 
@@ -300,7 +300,7 @@ ORDER BY block_date DESC
 
 ## V0.1 caveats
 
-This DEX/curated-tables reference is V0.1.1 and incomplete:
+This curated-tables reference is V0.1 and incomplete:
 
 - **Per-DEX deep analytics not covered.** Cetus concentrated liquidity, DeepBook orderbook state, Bluefin perps — none are documented here yet. Use `dex_sui.trades` for swap-level volume; drop to `sui.events` for protocol internals.
 - **`sui_tvl.lending_pools_gold` is BTC-only at the public gold layer.** Schema verified May 2026: 10 columns, all BTC-denominated (`btc_collateral`, `btc_borrow`, `btc_supply` + USD variants). Spellbook bronze tables exist for 5 protocols (navi, suilend, scallop, bucket, alphalend) but aren't published as gold tables. Full multi-asset Sui lending TVL still requires the raw-events approach in `protocol-patterns.md`.

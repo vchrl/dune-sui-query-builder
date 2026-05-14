@@ -61,16 +61,23 @@ Full annotated SQL: [`examples/navi-v8-pipeline.sql`](./examples/navi-v8-pipelin
 
 ## Which Dune source for what?
 
-Sui's data model is fundamentally different from EVM (curated tables for most DeFi) and Solana (object-centric state). For Sui lending and most protocol-specific work, tool selection is non-obvious:
+Sui's data model is fundamentally different from EVM (curated tables for most DeFi) and Solana (object-centric state). Sui has 5 curated spell tables for specific domains; everything else drops to raw event/object archaeology:
 
 ```mermaid
 flowchart TD
-    Start[What kind of Sui<br/>analytics question?] --> A{Type of question}
+    Start[What kind of Sui<br/>analytics question?] --> Curated{Covered by a<br/>curated spell table?}
+
+    Curated -->|DEX swaps and volume| C1[dex_sui.trades<br/>9 protocols since May 2023]
+    Curated -->|BTCfi: BTC on Sui| C2[sui_tvl.btc_ecosystem<br/>BTC-only at gold layer]
+    Curated -->|Daily chain stats:<br/>PTBs, zkLogin, gas| C3[sui_daily.stats]
+    Curated -->|Walrus storage| C4[sui_walrus.base_table]
+    Curated -->|CEX flows on Sui| C5[cex.addresses<br/>+ sui.transactions]
+    Curated -->|None of those| A{Drop to raw:<br/>type of question}
 
     A -->|Flows: deposits,<br/>borrows, swaps| E1[sui.events<br/>filter by event_type]
     A -->|State at historical time T| E2[sui.objects<br/>latest version per object_id]
     A -->|Just function call counts| E3[sui.move_call<br/>cheapest option]
-    A -->|Gas, tx success,<br/>zkLogin breakdown| E4[sui.transactions]
+    A -->|Per-tx detail: gas,<br/>success, signers| E4[sui.transactions]
     A -->|Current TVL / rates /<br/>asset list| Live{Protocol embeds<br/>USD in events?}
 
     Live -->|Yes, Suilend style| E5[sui.events on<br/>ReserveAssetDataEvent]
@@ -81,7 +88,7 @@ flowchart TD
     P -->|No, long-tail| E8[Pyth Hermes via http_get<br/>same oracle protocols use]
 ```
 
-This decision tree, the schema breakdowns, and the anti-patterns are all encoded in [`references/sui-data-model.md`](./references/sui-data-model.md).
+This decision tree, the schema breakdowns, and the anti-patterns are encoded in [`references/sui-data-model.md`](./references/sui-data-model.md); the curated-table branch is fully documented in [`references/sui-curated-tables.md`](./references/sui-curated-tables.md).
 
 ## What's in the box
 
