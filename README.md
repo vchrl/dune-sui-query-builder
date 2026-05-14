@@ -148,7 +148,7 @@ Adjust the destination path per your agent's skill directory convention. The ski
 
 ### As reference documentation (no agent needed)
 
-Just read `references/sui-data-model.md` and `references/protocol-patterns.md` directly. They were written to be skimmable for someone debugging at 2am — schema breakdowns, full SQL examples, anti-patterns observed in real production dashboards.
+Just read `references/sui-data-model.md`, `references/sui-curated-tables.md`, and `references/protocol-patterns.md` directly. They were written to be skimmable for someone debugging at 2am — schema breakdowns, full SQL examples, anti-patterns observed in real production dashboards.
 
 ## Quick start
 
@@ -206,7 +206,7 @@ This is a V0.1 release. Be aware of:
 
 ## Why this exists
 
-Sui lending has no decoded protocol tables on Dune, so every analyst rediscovers the same edge cases — binary type handling, the `::coin::COIN` problem, package upgrades that silently truncate history, the double-hex encoding in `prices.hour`. This skill packages a weekend's worth of comparative-lending-protocol work into something portable.
+Sui's DeFi data on Dune is uneven — strong curated coverage for DEX swaps, BTCfi, and chain stats, but lending and most protocol internals still require raw `sui.events` archaeology. Every analyst rediscovers the same edge cases — binary type handling, the `::coin::COIN` problem, package upgrades that silently truncate history, the double-hex encoding in `prices.hour`. This skill packages a weekend's worth of comparative-lending-protocol work into something portable.
 
 Public because the methodology is useful for anyone analyzing Sui on Dune, and the work belongs somewhere the next person can find it.
 
