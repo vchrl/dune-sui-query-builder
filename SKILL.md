@@ -7,7 +7,7 @@ description: Build, debug, and optimize DuneSQL queries for Sui blockchain analy
 
 Build, debug, and optimize DuneSQL (Trino-based) queries for Sui blockchain analytics. This skill covers Dune's Sui data model, Sui-specific quirks (object-centric architecture, binary types, event JSON parsing, package upgrades), and a class of patterns that goes beyond what the indexed tables alone can do — **chained Sui RPC calls inside SQL via Dune's LiveFetch**, plus oracle-grade pricing via the **Pyth Hermes API** for tokens that aren't in `prices.hour`.
 
-Before writing any query, read `references/sui-data-model.md` for the table catalog and Sui-specific edge cases. For Navi or Suilend protocol queries, also read `references/protocol-patterns.md` — it covers package archaeology, mislabel investigations, and a fully-validated 4-stage dynamic pipeline that achieves 100% asset coverage on a $235M lending protocol with no third-party indexer.
+Before writing any query, read `references/sui-data-model.md` for the table catalog and Sui-specific edge cases. For Sui DEX queries (Cetus, Bluefin, DeepBook, Aftermath, Kriya, FlowX, Momentum, BlueMove, Obric), BTCfi work, Walrus storage, or Sui chain stats — read `references/sui-dex-patterns.md` first; these often have curated spell tables that bypass raw event archaeology. For Navi or Suilend protocol queries, read `references/protocol-patterns.md` — it covers package archaeology, mislabel investigations, and a fully-validated 4-stage dynamic pipeline that achieves 100% asset coverage on a $235M lending protocol with no third-party indexer.
 
 ## Task Router
 
@@ -25,7 +25,7 @@ Mode 4 deserves special attention. The most-cited "Navi Protocol" reference dash
 When the user asks for a new query:
 
 1. **Clarify the goal** if ambiguous (e.g., "Do you mean unique depositors or deposit events? Cumulative supply or net flow? Snapshot today or time-series?"). Restate the goal before writing SQL.
-2. **Pick the right data source.** Sui has *no decoded protocol tables on Dune for lending or most DeFi domains* — Dune's curated `lending.*` covers 15 EVM chains only, and `dex.trades` covers EVM + Solana. A `dex_sui.trades` table exists in the data explorer but isn't documented in the official catalog (as of May 2026) — verify before relying. For lending and most protocol-specific Sui analytics, decide between:
+2. **Pick the right data source.** Check `references/sui-dex-patterns.md` first — 5 curated Sui spell tables exist (`dex_sui.trades`, `sui_tvl.btc_ecosystem`, `sui_daily.stats`, `sui_walrus.base_table`, `cex.addresses`). If a curated table covers the question, use it. For Sui lending and most other protocol-specific Sui analytics, no curated tables exist — decide between:
    - `sui.events` — flows and actions emitted by `event::emit`
    - `sui.objects` — historical state changes per object-version
    - `sui.move_call` — cheap function-call counting

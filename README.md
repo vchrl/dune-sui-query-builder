@@ -2,17 +2,17 @@
 
 An [agent skill](https://agentskills.io/) for building, debugging, and optimizing **DuneSQL** queries against **Sui** blockchain data — chained Sui RPC and Pyth Hermes patterns that go beyond what indexed tables alone can deliver. Works with Claude, Cursor, OpenCode, Codex, Gemini CLI, and any agent-skill-compatible tool.
 
-![status](https://img.shields.io/badge/status-v0.1%20experimental-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![sui](https://img.shields.io/badge/chain-Sui-4DA2FF) ![dune](https://img.shields.io/badge/engine-DuneSQL-F26DB6)
+![status](https://img.shields.io/badge/status-v0.1.1%20experimental-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![sui](https://img.shields.io/badge/chain-Sui-4DA2FF) ![dune](https://img.shields.io/badge/engine-DuneSQL-F26DB6)
 
 ---
 
 ## The hook
 
-Sui's lending and most DeFi protocols don't have decoded curated tables on Dune. The official `lending.*` tables [cover 15 EVM chains](https://docs.dune.com/data-catalog/curated/lending/overview); `dex.trades` [covers EVM + Solana](https://docs.dune.com/data-catalog/curated/dex-trades/overview). A few narrow Sui-specific curated tables exist (`sui_walrus.*`, `sui_daily.*`, `sui_tvl.*`), and a `dex_sui.trades` table is observable in the data explorer but isn't documented in the official catalog as of May 2026. For Sui lending specifically — which is what this skill is built for — you query `sui.events` directly and filter by `event_type` string.
+Sui's lending and most protocol-specific DeFi don't have decoded curated tables on Dune. The official `lending.*` tables [cover 15 EVM chains](https://docs.dune.com/data-catalog/curated/lending/overview); `dex.trades` [covers EVM + Solana](https://docs.dune.com/data-catalog/curated/dex-trades/overview), not Sui directly. **What does exist for Sui** (verified May 2026): 5 curated spell tables — `dex_sui.trades` (DEX swaps across 9 protocols, full multi-asset), `sui_tvl.btc_ecosystem` (BTCfi-only — BTC TVL across 5 lending protocols and DEX pools), `sui_daily.stats` (chain activity), `sui_walrus.base_table` (Walrus storage), `cex.addresses` (cross-chain, includes Sui). For multi-asset Sui lending (Navi, Suilend, Scallop, Bucket, AlphaLend at the full-portfolio level — not just BTC), LP positions, protocol internals, and most other granular work — you still query `sui.events` directly.
 
 That makes **package-identity verification a critical skill**. Without it, a single hex mismatch can sit unchallenged in widely-cited dashboards. Concrete example: the most-cited "Navi Protocol" reference on Dune ([Prudentia Labs' dashboard](https://dune.com/mementomori7777/navi-protocol-full-dashboard), 19 charts) queries `0xf95b06141...::reserve::ReserveAssetDataEvent` — which is **Suilend's** package, not Navi's. Triple-confirmed against Suilend's [SDK](https://docs.suilend.fi/), [GitHub](https://github.com/suilend/suilend), and DefiLlama. Not a criticism of the team — a reminder that on Sui, you have to verify the bytes.
 
-This skill packages the methodology.
+This skill packages the methodology — when to use curated tables, when to drop down to raw events.
 
 ## Proof of value
 
@@ -91,24 +91,30 @@ dune-sui-query-builder/
 ├── references/
 │   ├── sui-data-model.md          Dune Sui table catalog · 8 edge cases ·
 │   │                              LiveFetch · Pyth Hermes · anti-patterns
+│   ├── sui-dex-patterns.md        Curated Sui spell tables · dex_sui.trades schema ·
+│   │                              BTCfi, daily stats, Walrus · when to use curated vs raw
 │   └── protocol-patterns.md       Navi 3-package archaeology · Suilend schemas ·
 │                                  the V8 4-stage pipeline · comparative analysis
 └── examples/
     └── navi-v8-pipeline.sql       Standalone production SQL — copy-paste-ready
 ```
 
-The two `references/` files are written to **stand alone as documentation** — you don't need to be a Claude user to get value from them. Read them like a technical handbook for analysts working on Sui.
+The three `references/` files are written to **stand alone as documentation** — you don't need to be a Claude user to get value from them. Read them like a technical handbook for analysts working on Sui.
 
 ## How this fits with Dune's tooling
 
-Dune ships its own [agent skill](https://github.com/duneanalytics/skills), [MCP server](https://docs.dune.com/api-reference/agents/mcp), and [CLI](https://docs.dune.com/api-reference/agents/cli-and-skills) — they teach agents how to discover datasets, write DuneSQL, execute queries, and manage costs. That's the *execution layer*. This is a *Sui domain layer* on top, focused on use cases where Dune's curated tables don't yet reach:
+Dune ships its own [agent skill](https://github.com/duneanalytics/skills), [MCP server](https://docs.dune.com/api-reference/agents/mcp), and [CLI](https://docs.dune.com/api-reference/agents/cli-and-skills) — they teach agents how to discover datasets, write DuneSQL, execute queries, and manage costs. That's the *execution layer*. This is a *Sui domain layer* on top — when to reach for which Sui table, what's curated vs. what needs raw event work:
 
-| Domain | Dune curated coverage (May 2026) | What this skill adds |
+| Domain | Dune coverage (verified May 2026) | What this skill adds |
 |---|---|---|
-| Sui lending (Navi, Suilend, Scallop) | None — `lending.*` is 15 EVM chains | Package archaeology, event schemas, the V8 LiveFetch pipeline |
-| Sui DEX (Cetus, Bluefin, DeepBook) | `dex_sui.trades` appears in the data explorer but undocumented in the official catalog — verify before relying | Raw `sui.events` patterns; V0.2 will audit `dex_sui.trades` properly |
-| Sui base data | 8 chain tables, [well-documented](https://docs.dune.com/data-catalog/sui/overview) | Sui edge cases: binary types, JSON parsing, double-hex `prices.hour`, the `::coin::COIN` problem |
-| General DuneSQL | All Dune docs | Use Dune's official skill |
+| Sui DEX swaps (Cetus, Bluefin, DeepBook, Aftermath, Kriya, FlowX, Momentum, BlueMove, Obric) | ✅ `dex_sui.trades` — 9 projects, since May 2023 | Schema reference, partition pruning, worked examples, when to drop to raw events |
+| Sui BTCfi (BTC on Sui across DEX + lending) | ✅ `sui_tvl.btc_ecosystem` + `_gold` intermediates | Schema documentation (intermediates aren't in Dune's data hub search) |
+| Sui chain stats (PTBs, zkLogin, gas, success rate) | ✅ `sui_daily.stats` | Pointer + worked example |
+| Walrus storage | ✅ `sui_walrus.base_table` | Pointer |
+| Sui CEX flows | ⚠️ Partial — `cex.addresses` includes Sui labels, but no `cex_flows_sui.*` table — join with `sui.transactions` yourself | DIY pattern |
+| Sui lending (Navi, Suilend, Scallop, Bucket, AlphaLend) | ⚠️ Partial — `sui_tvl.lending_pools_gold` publishes **BTC-only TVL** across these 5 protocols; spellbook source has bronze models for full multi-asset data but isn't published as a gold table | Package archaeology, event schemas, V8 LiveFetch pipeline (the practical path for multi-asset, granular, real-time lending data) |
+| Sui DEX *internals* (LP positions, fee tiers, pool depth) | ❌ Only swap-level via `dex_sui.trades` | Raw `sui.events` / `sui.objects` patterns |
+| Sui base chain data | ✅ 8 chain tables, [well-documented](https://docs.dune.com/data-catalog/sui/overview) | Sui edge cases: binary types, JSON parsing, double-hex `prices.hour`, the `::coin::COIN` problem |
 
 Recommended stack: **Dune MCP/Skill/CLI for execution + this skill for Sui domain knowledge + your agent of choice** (Claude, Cursor, Codex, Gemini CLI — anything agent-skill-compatible).
 
@@ -153,6 +159,7 @@ Three prompts that demonstrate what the skill enables:
 ## What's solid in V0.1
 
 - Dune Sui table catalog: `sui.events`, `sui.objects`, `sui.move_call`, `sui.transactions`, `sui.move_package`
+- **5 curated Sui spell tables documented** (V0.1.1): `dex_sui.trades` (9 DEXs since May 2023), `sui_tvl.btc_ecosystem` + `_gold` intermediates, `sui_daily.stats`, `sui_walrus.base_table`, `cex.addresses`
 - Binary type decoding, JSON-string parsing, partition pruning patterns
 - LiveFetch patterns: single-call, multi-stage CTE chains, parallel per-row
 - Pyth Hermes integration with verified feed IDs (April 2026)
@@ -160,14 +167,16 @@ Three prompts that demonstrate what the skill enables:
 - Suilend `ReserveAssetDataEvent` schema (the USD-in-events trick)
 - The V8 4-stage pipeline (validated, 100% coverage on $235M)
 - 8 anti-patterns from real production dashboards, with corrections
+- Decision tree: curated spell tables vs. raw `sui.events`
 
 ## V0.1 limitations — read before relying
 
 This is a V0.1 release. Be aware of:
 
 - **Pyth feed IDs are point-in-time** (verified April 2026). Feed IDs are usually stable but verify before production use.
-- **Curated Dune tables for Sui are evolving.** As of May 2026, Dune's `lending.*` and `dex.trades` curated tables don't include Sui. A `dex_sui.trades` table appears in the data explorer but isn't documented in the official catalog — verify schema and coverage if you plan to use it. V0.2 will audit these properly.
-- **Only Navi and Suilend deeply mapped.** Cetus, Bluefin, Scallop, Aftermath, DeepBook, Volo, Haedal are mentioned in the trigger description but not yet documented with schemas and patterns. Contributions very welcome.
+- **`sui_tvl.*_gold` intermediates are undocumented in Dune's data hub** — they're queryable and used in production dashboards, but schemas can change without notice. Always sample before relying. Spellbook commits ~8 months old.
+- **`sui_tvl.lending_pools_gold` is BTC-only at the public gold layer.** Schema verified May 2026: 10 columns, all BTC. Spellbook source has bronze tables for 5 protocols (navi, suilend, scallop, bucket, alphalend) — but only the BTC slice is published. Full multi-asset Sui lending still requires the raw-events approach.
+- **Per-DEX deep analytics not yet covered.** Cetus concentrated liquidity, DeepBook orderbook state, Bluefin perps internals — flagged for V0.2. Use `dex_sui.trades` for swap-level work today.
 - **Liquidation event paths for Navi** flagged in the skill but not yet sampled — you'll need to discover them via the included discovery query before relying.
 - **Some `event_json` field paths are best-guesses** from SDK code and explicitly flagged with uncertainty disclaimers. The skill instructs Claude to verify by sampling before using.
 - **Historical Navi TVL not yet built.** The path via `sui_tryGetPastObject` is documented but not implemented — see roadmap.
@@ -177,10 +186,10 @@ This is a V0.1 release. Be aware of:
 ## Roadmap
 
 ### V0.2
-- **Audit emerging Sui curated tables** — `dex_sui.trades`, `sui_walrus.*`, `sui_daily.*`, `sui_tvl.*`. Document schemas, coverage windows, freshness, and integration patterns with the raw `sui.events` approach.
+- **Per-DEX protocol patterns** — Cetus concentrated liquidity, DeepBook orderbook state, Bluefin perps. Hybrid approach: `dex_sui.trades` for volume + raw `sui.events` / `sui.objects` for internals.
 - **Pure-Pyth pricing** — discover all 35 Navi asset Pyth feed IDs from Navi's on-chain oracle registry; batch them in one Hermes call. Adds confidence intervals + EMA prices.
 - **Historical Navi TVL** via `sui_tryGetPastObject` snapshots. Date → checkpoint → object version mapping, replayable from any starting point.
-- **Cetus and Bluefin** protocol patterns (DEX/perps).
+- **Multi-asset Sui lending TVL** — extend beyond BTCfi using a hybrid of `sui_tvl.lending_pools_gold` + raw events.
 - **Eval suite:** corpus of prompts + expected behaviors, run on every skill update.
 
 ### Future

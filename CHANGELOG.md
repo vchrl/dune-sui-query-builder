@@ -6,6 +6,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [0.1.1] — 2026-05-14
+
+DEX coverage and curated-table audit, with spellbook source review.
+
+### Added
+- `references/sui-dex-patterns.md` — new reference covering the 5 curated Sui spell tables (`dex_sui.trades`, `sui_tvl.btc_ecosystem`, `sui_daily.stats`, `sui_walrus.base_table`, `cex.addresses`), plus the `sui_tvl.*_gold` intermediates
+- Schema for `dex_sui.trades` (28 columns) and full project list (9 DEXs since Sui mainnet launch)
+- Schema for `sui_tvl.btc_ecosystem` (29 columns)
+- **Verified schema for `sui_tvl.lending_pools_gold` via probe query**: 10 columns, all BTC-denominated
+- **Spellbook source review**: 5 lending protocols are decoded in bronze tables (navi, suilend, scallop, bucket, alphalend) but only the BTC slice is published as a gold table
+- Decision tree (mermaid): when to use curated spell tables vs. raw `sui.events`
+- 4 worked example queries — DEX volume by project, DEX vs lending TVL split, top pairs, daily PTB/zkLogin activity
+- Cross-references to `@insights4vc` and `@seoul` reference dashboards
+
+### Changed
+- README hook reframed: now leads with what *does* exist for Sui (5 spell tables), then explains where raw events are still required
+- README "How this fits with Dune's tooling" table expanded — 7 domains with explicit verified coverage status; Sui lending row now reflects partial BTC-only coverage rather than "none"
+- README V0.1 limitations updated: precise wording around BTC-only gold layer + bronze tables existing
+- SKILL.md routing: DEX/BTCfi/Walrus/chain-stats queries now route to `sui-dex-patterns.md` first
+- `sui-data-model.md` opening: documents all 5 curated tables explicitly instead of scoping vaguely
+
+### Investigation
+- Verified via Dune MCP `searchTables`, `executeQueryById`, `getDuneQuery`, `createDuneQuery` probe on 2026-05-14
+- Cross-validated against [@insights4vc/tradingdexgeneralsui](https://dune.com/insights4vc/tradingdexgeneralsui) and [@insights4vc/btcfi-protocol-level](https://dune.com/insights4vc/btcfi-protocol-level) reference dashboards
+- Reviewed [duneanalytics/spellbook Sui models](https://github.com/duneanalytics/spellbook/tree/main/dbt_subprojects/daily_spellbook/models/sui) to verify bronze/silver/gold layering
+
+---
+
 ## [0.1.0] — 2026-05-14
 
 Initial public release.
