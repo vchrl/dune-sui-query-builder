@@ -102,6 +102,8 @@ Contains object state changes (creations, mutations, deletions). One row per obj
 - **`coin_balance` is raw.** SUI: divide by 1e9. USDC: 1e6. Verify per token.
 - **`Deleted` objects still appear.** Filter `object_status != 'Deleted'` for live-state queries.
 - **Historical state via `sui.objects` is event-driven**; for current-snapshot accuracy, prefer LiveFetch (see below) — `sui.objects` shows state changes per ingestion, but the freshest version per object is one query away.
+- **`object_json` JSON path convention** (important when porting RPC-based parsers): `sui.objects.object_json` strips both the RPC `$.data.content` wrapper AND all `.fields` indirection that the RPC response uses for nested Move structs. A nested Move struct field that the RPC reports as `$.data.content.fields.value.fields.X.fields.Y` is accessible as `$.value.X.Y` in `object_json`. Divisors (`/1e9` for Navi-9 normalization, `/1e25` for ray rates, `/1e27` for indices) carry over identically — only the path traversal changes. See `references/protocol-patterns.md` § "Navi — `sui.objects.object_json` path convention" for a full table mapping V8 RPC paths to V9.5 `sui.objects` paths.
+- **`coin_type` returned by `sui.objects` lacks the `0x` prefix** that the RPC response includes. `coin_type` here returns e.g. `"0000000000000000000000000000000000000000000000000000000000000002::sui::SUI"` (no `0x`). Apply the same short-form-for-system-addresses CASE block downstream.
 
 ## sui.transactions — Full Schema
 
@@ -366,6 +368,7 @@ Pyth is THE oracle on Sui. Navi, Suilend, Cetus, Bluefin all consume Pyth feeds 
 | NAVX/USD | `88250f854c019ef4f88a5c073d52a18bb1c6ac437033f5932cd017d24917ab46` |
 | XAU/USD (gold) | `d7db067954e28f51a96fd50c6d51775094025ced2d60af61ec9803e553471c88` |
 | USDC/USD | `eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a` |
+| USDY/USD | `e393449f6aff8a4b6d3e1165a7c9ebec103685f3b41e60db4277b5b6d10e7326` |
 
 **Fetch pattern:**
 
@@ -406,6 +409,71 @@ For full asset coverage:
 4. Tag the source per row so you can audit coverage
 
 See `references/protocol-patterns.md` for a worked Navi example with cascading fallbacks across all 35 assets.
+
+### Bulk historical pricing — Pyth Benchmarks (not Hermes /v2/updates)
+
+Pyth Hermes' `/v2/updates/price/<unix_timestamp>` works for single-snapshot historical lookups but **rate-limits hard under parallel calls** (HTTP 429 starts firing at roughly 20–30 concurrent calls into the same endpoint, verified May 18 2026). For bulk historical pricing (e.g., a 90-day backfill across multiple feeds), use **Pyth Benchmarks** instead. It returns full OHLCV history per feed in a single response, so N days × M feeds collapses to M HTTP calls.
+
+**Endpoint:** `https://benchmarks.pyth.network/v1/shims/tradingview/history`
+
+**Parameters:**
+- `symbol` — Pyth symbol with URL-encoded slash, e.g., `Crypto.BTC%2FUSD`, `Crypto.SUI%2FUSD`, `Metal.XAU%2FUSD`
+- `resolution` — `1D`, `1H`, `15`, etc.
+- `from`, `to` — Unix timestamps (seconds)
+
+**Response shape:** `{"s":"ok", "t":[...], "o":[...], "h":[...], "l":[...], "c":[...], "v":[...]}` where `t` is timestamp array, `c` is close-price array (use this for daily snapshot), etc.
+
+**Verified symbols (May 2026):**
+
+| Pyth Benchmarks symbol | Description |
+|------------------------|-------------|
+| `Crypto.BTC/USD` | BTC |
+| `Crypto.ETH/USD` | ETH |
+| `Crypto.SUI/USD` | SUI |
+| `Crypto.SOL/USD` | SOL |
+| `Crypto.NAVX/USD` | NAVX |
+| `Crypto.USDY/USD` | Ondo USDY (yield-bearing) |
+| `Metal.XAU/USD` | Gold (note: `Metal.` prefix, not `Crypto.`) |
+
+**Fetch + parse pattern (one feed):**
+
+```sql
+WITH pyth_btc_resp AS (
+  SELECT http_get(
+    'https://benchmarks.pyth.network/v1/shims/tradingview/history'
+      || '?symbol=Crypto.BTC%2FUSD&resolution=1D'
+      || '&from=' || cast(cast(to_unixtime(cast(CURRENT_DATE - INTERVAL '91' DAY AS timestamp)) AS bigint) AS varchar)
+      || '&to=' || cast(cast(to_unixtime(CURRENT_TIMESTAMP) AS bigint) AS varchar),
+    ARRAY['Content-Type: application/json']
+  ) AS resp
+),
+btc_daily AS (
+  SELECT
+    DATE(from_unixtime(t_val)) AS price_date,
+    c_val AS price
+  FROM pyth_btc_resp,
+       UNNEST(CAST(json_extract(resp, '$.t') AS array(bigint)),
+              CAST(json_extract(resp, '$.c') AS array(double))) AS t(t_val, c_val)
+)
+SELECT * FROM btc_daily
+```
+
+Multiple feeds in one query: wrap each in its own `*_resp` CTE, `UNION ALL` the parsed rows with a `feed` tag, then `GROUP BY price_date` and `MAX(CASE WHEN feed = 'BTC' THEN price END)` to pivot.
+
+**When to use Hermes `/v2/updates` vs Benchmarks:**
+
+| Use case | Endpoint |
+|----------|----------|
+| Live/latest price (one snapshot, any number of feeds in one call) | Hermes `/v2/updates/price/latest` |
+| Single historical point in time (any number of feeds in one call) | Hermes `/v2/updates/price/<ts>` |
+| Bulk historical (e.g., 30/90/365 days of daily prices) | **Benchmarks `/v1/shims/tradingview/history`** |
+| Confidence intervals (`conf`), EMA prices | Hermes only |
+
+For a worked Navi historical example with 7 feeds × 90 days using Benchmarks, see `references/protocol-patterns.md` § "V0.2 — Historical replay" and live query `7528506`.
+
+### Dune's per-query HTTP cap
+
+Dune limits a single query to ~40 outbound HTTP calls. Plan accordingly: dynamic-discovery pipelines (multi-stage RPC) plus Pyth fetching can hit this ceiling. The Navi V9.5.2 historical query stays under by (1) restricting `suix_getCoinMetadata` to the 7 `::coin::COIN` reserves that actually need disambiguation rather than all 35, and (2) using Benchmarks one-call-per-feed instead of Hermes one-call-per-(date,feed).
 
 ## Performance Best Practices
 

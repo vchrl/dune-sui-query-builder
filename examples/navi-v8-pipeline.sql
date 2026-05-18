@@ -1,6 +1,13 @@
 -- =====================================================================
--- Navi 4-Stage Dynamic Pipeline (V8)
+-- Navi 4-Stage Dynamic Pipeline (V8.1)
 -- =====================================================================
+--
+-- v8.1 (May 2026): INDEX MULTIPLICATION FIX
+--   Prior V8 returned SCALED supply/borrow values, silently understating
+--   actual native amounts by 5-11% on older reserves with accrued interest.
+--   Fix: actual_native = (raw_total_supply / 1e9) × (current_supply_index / 1e27).
+--   Verified against Navi frontend — all 35 reserves match within 0.2%.
+--   Also added USDY Pyth feed (Crypto.USDY/USD) for the yield-bearing $1.13 token.
 --
 -- Purpose: Achieves 100% asset coverage on Navi's $235M lending protocol
 -- with zero third-party indexer, zero hardcoded balances, zero hardcoded
@@ -80,10 +87,15 @@ parsed AS (
     cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.id') AS INTEGER) AS asset_id,
     json_extract_scalar(obj_json, '$.data.content.fields.value.fields.coin_type') AS coin_type_full,
     split_part(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.coin_type'), '::', 1) AS addr_raw,
-    -- Navi-9 normalization: total_supply scaled by 1e9 internally
-    -- regardless of token decimals. SUI, USDC, xBTC all divide by 1e9.
-    try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.supply_balance.fields.total_supply') AS DOUBLE) / 1e9 AS supply_native,
-    try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.borrow_balance.fields.total_supply') AS DOUBLE) / 1e9 AS borrow_native,
+    -- Navi-9 normalization + index multiplication
+    -- (raw / 1e9) × (index / 1e27) = actual native amount.
+    -- The index is a ray-encoded interest accumulator that starts at 1.0 and grows
+    -- as interest accrues. Without the multiplication, supply/borrow on older
+    -- reserves are silently under-reported by 5-11%.
+    try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.supply_balance.fields.total_supply') AS DOUBLE) / 1e9
+      * try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.current_supply_index') AS DOUBLE) / 1e27 AS supply_native,
+    try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.borrow_balance.fields.total_supply') AS DOUBLE) / 1e9
+      * try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.current_borrow_index') AS DOUBLE) / 1e27 AS borrow_native,
     -- Ray-encoded rates: 1e27 scaling. Divide by 1e25 to get APR percent
     -- (that's 1e27 to scale down, * 100 to make percent).
     try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.current_supply_rate') AS DOUBLE) / 1e25 AS supply_apr_pct,
@@ -151,6 +163,7 @@ hermes_response AS (
       || '&ids[]=d7db067954e28f51a96fd50c6d51775094025ced2d60af61ec9803e553471c88' -- XAU/USD (gold, for XAUM)
       || '&ids[]=e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43' -- BTC/USD
       || '&ids[]=ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace' -- ETH/USD
+      || '&ids[]=e393449f6aff8a4b6d3e1165a7c9ebec103685f3b41e60db4277b5b6d10e7326' -- USDY/USD
       || '&parsed=true',
     ARRAY['Content-Type: application/json']
   ) AS resp
@@ -169,7 +182,8 @@ pyth_pivoted AS (
     MAX(CASE WHEN feed_id = '88250f854c019ef4f88a5c073d52a18bb1c6ac437033f5932cd017d24917ab46' THEN price END) AS navx_pyth,
     MAX(CASE WHEN feed_id = 'd7db067954e28f51a96fd50c6d51775094025ced2d60af61ec9803e553471c88' THEN price END) AS xaum_pyth,
     MAX(CASE WHEN feed_id = 'e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43' THEN price END) AS btc_pyth,
-    MAX(CASE WHEN feed_id = 'ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace' THEN price END) AS eth_pyth
+    MAX(CASE WHEN feed_id = 'ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace' THEN price END) AS eth_pyth,
+    MAX(CASE WHEN feed_id = 'e393449f6aff8a4b6d3e1165a7c9ebec103685f3b41e60db4277b5b6d10e7326' THEN price END) AS usdy_pyth
   FROM pyth_prices
 ),
 
@@ -218,6 +232,8 @@ joined AS (
       CASE WHEN upper(m.true_symbol) IN ('VSUI','HASUI','STSUI','CERT','SPRING_SUI','SPSUI','MSUI','KSUI','AFSUI','TRSUI') THEN b.sui_price END,
       CASE WHEN upper(m.true_symbol) LIKE '%BTC%' THEN COALESCE(py.btc_pyth, b.btc_price_dune) END,
       CASE WHEN upper(m.true_symbol) IN ('ETH','WETH','SUIETH','LZETH','LZWETH') THEN py.eth_pyth END,
+      -- USDY (yield-bearing, trades ~$1.13) → Pyth oracle
+      CASE WHEN upper(m.true_symbol) = 'USDY' THEN py.usdy_pyth END,
       CASE WHEN upper(m.true_symbol) LIKE '%USD%' OR upper(m.true_symbol) IN ('AUSD','BUCK','DAI','FRAX','USDB','USDC','USDT','SUSDE') THEN 1.0 END,
       CASE WHEN upper(m.true_symbol) IN ('SOL','WSOL','LZSOL') THEN b.sol_price END,
       CASE WHEN upper(m.true_symbol) = 'NAVX' THEN py.navx_pyth END,
@@ -228,6 +244,7 @@ joined AS (
       WHEN upper(m.true_symbol) IN ('VSUI','HASUI','STSUI','CERT','SPRING_SUI') THEN 'fallback:SUI'
       WHEN upper(m.true_symbol) LIKE '%BTC%' THEN 'pyth:BTC'
       WHEN upper(m.true_symbol) IN ('ETH','WETH','SUIETH') THEN 'pyth:ETH'
+      WHEN upper(m.true_symbol) = 'USDY' AND py.usdy_pyth IS NOT NULL THEN 'pyth:USDY'
       WHEN upper(m.true_symbol) LIKE '%USD%' THEN 'fallback:$1'
       WHEN upper(m.true_symbol) = 'NAVX' THEN 'pyth:NAVX'
       WHEN upper(m.true_symbol) IN ('XAUM','XAU') THEN 'pyth:XAU'

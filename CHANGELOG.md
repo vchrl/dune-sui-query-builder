@@ -6,6 +6,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [0.2.0] — 2026-05-18
+
+Navi historical TVL replay pattern landed; Pyth Benchmarks bulk-historical endpoint documented; critical Navi-9 normalization bug fix.
+
+### Added
+- **Navi V0.2 historical replay architecture** (`references/protocol-patterns.md` § "V0.2 — Historical replay") — full pipeline documentation for daily Navi TVL reconstruction via `sui.objects` indexed replay + Pyth Benchmarks historical pricing. Worked example query `7528506` (90-day daily, all 35 reserves, matches Navi portal Total Supply within 0.2%).
+- **Pyth Benchmarks TradingView shim pattern** (`references/sui-data-model.md`) — new subsection documenting `https://benchmarks.pyth.network/v1/shims/tradingview/history` as the correct endpoint for bulk historical pricing. Hermes `/v2/updates/price/<ts>` rate-limits hard under parallel calls (HTTP 429 at ~20-30 concurrent), Benchmarks returns full OHLCV history per feed in single response. Verified symbols table and complete SQL parse pattern included.
+- **Mysten RPC batching constraint** (`references/protocol-patterns.md`) — explicit documentation that `fullnode.mainnet.sui.io` rejects JSON-RPC 2.0 batching (error `-32005`, verified May 18 2026); naive `N parallel http_post` pipelines flake at scale, forcing the indexed-`sui.objects` architecture for historical replay.
+- **Dune per-query HTTP cap** (~40 calls) documented in `sui-data-model.md`.
+- **`sui.objects.object_json` JSON path convention** — new technical discovery (#7) in `protocol-patterns.md`, with full RPC-vs-`sui.objects` path comparison table for Navi reserves. Also documented in `sui-data-model.md` § "sui.objects — Full Schema" usage notes.
+- **3-package union scope clarification** — new technical discovery (#8) in `protocol-patterns.md`: the 3-package archaeology applies to *events* only; reserve objects are stable across migrations (still carry legacy `0xd899cf7d` struct type), so historical state replay needs zero era-handling.
+- **USDY Pyth feed ID** (`e393449f6aff8a4b6d3e1165a7c9ebec103685f3b41e60db4277b5b6d10e7326`) added to the verified feeds table in `sui-data-model.md` and to the V8.1 example SQL. USDY is a yield-bearing token currently trading ~$1.13, not $1 — flat-$1 fallback was visibly wrong on the ~$2.1M USDY supply.
+- **`sui.objects.coin_type` formatting note** — returns coin types without `0x` prefix, unlike RPC; requires same address-canonicalization downstream.
+
+### Fixed
+- **Navi-9 normalization bullet** (`protocol-patterns.md` § "Key technical discoveries" #1) — previously claimed `raw / 1e9 = native amount`, which silently under-reports older reserves by 5-11%. Corrected to `(raw / 1e9) × (index / 1e27)`. The bug hid on recent BTC reserves (xBTC, enzoBTC, MBTC) where index ≈ 1.00, but caused visible drift on SUI (~9%), DEEP (~9%), WAL (~8%), USDC native (~11%).
+- **V8 SQL example** in `protocol-patterns.md` (lines 259–261) — applied the same index multiplication fix.
+- **`examples/navi-v8-pipeline.sql`** — applied the index multiplication fix and added USDY feed. Header bumped to V8.1 with explanation of the fix.
+
+### Changed
+- `protocol-patterns.md` § "What v2 would do" reframed as "V0.2 — Historical replay (DONE, May 2026)" with the actual architecture (indexed `sui.objects`, not the originally-proposed `sui_tryGetPastObject`). Includes architecture table, cost benchmarks, and reference to live query `7528506`.
+- Suilend-vs-Navi comparison table row for "Historical TVL replay" updated: Navi is no longer "Hard" — now "Tractable via `sui.objects` indexed replay + Pyth Benchmarks historical (V0.2 of this skill)".
+- "Useful Public Dune Query References" updated: `7377142` re-labeled as V8.1 with fix note; `7528506` added.
+
+### Investigation
+- Validated via Dune MCP probes on 2026-05-18:
+  - `7528359` — `sui.objects` coverage probe (all 35 reserves, 100% coverage on 30-day window)
+  - `7528368` — JSON schema sample for SUI reserve (discovered `$.value.*` path convention)
+  - `7528380` — All-35 reserve parsing validation (no exceptions)
+  - `7528403` — Historical depth probe (1,022 days of clean coverage available)
+  - `7528512` — Pyth Benchmarks endpoint shape probe
+  - `7528623` — USDY Pyth feed probe (confirmed missing from `prices.hour`, available at `Crypto.USDY/USD` benchmarks symbol)
+- Cross-validated final supply/borrow numbers against Navi's portal frontend at https://app.naviprotocol.io/ on 2026-05-18 — all 35 reserves match within 0.5%, total Protocol TVL within 0.2%.
+
+---
+
 ## [0.1.2] — 2026-05-14
 
 Filename clarity: rename `references/sui-dex-patterns.md` → `references/sui-curated-tables.md`. Content unchanged.
@@ -64,17 +100,16 @@ Initial public release.
 - Liquidation event paths for Navi flagged in the skill but not yet sampled
 - Pyth feed IDs verified April 2026 — recommend verification before production use
 - Some `event_json` field paths are best-guesses from SDK code, flagged with uncertainty disclaimers
-- Historical Navi TVL path documented but not implemented (`sui_tryGetPastObject` snapshots)
+- Historical Navi TVL path documented but not implemented (`sui_tryGetPastObject` snapshots) — **resolved in [0.2.0]** via indexed `sui.objects` replay (query `7528506`); the `sui_tryGetPastObject` route was superseded
 - No automated eval suite yet
 
 ---
 
 ## Roadmap
 
-### [0.2.0] — planned
-- **Audit emerging Sui curated tables** — `dex_sui.trades`, `sui_walrus.*`, `sui_daily.*`, `sui_tvl.*`. Document schemas, coverage, freshness, and integration patterns with raw `sui.events` work.
+### [0.3.0] — planned
 - **Pure-Pyth pricing** replacing the `prices.hour` + Pyth hybrid for the Navi pipeline (discover feed IDs from Navi's on-chain oracle registry, batch in one Hermes call, add confidence intervals + EMA prices)
-- **Historical Navi TVL** via `sui_tryGetPastObject` — date → checkpoint → object version mapping
+- **Audit emerging Sui curated tables** — `dex_sui.trades`, `sui_walrus.*`, `sui_daily.*`, `sui_tvl.*`. Document schemas, coverage, freshness, and integration patterns with raw `sui.events` work.
 - **Cetus protocol patterns** — concentrated liquidity DEX schemas
 - **Bluefin protocol patterns** — perpetuals + orderbook
 - **Automated eval suite** — corpus of prompts + expected behaviors

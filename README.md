@@ -186,7 +186,7 @@ This is a V0.1 release. Be aware of:
 - **Per-DEX deep analytics not yet covered.** Cetus concentrated liquidity, DeepBook orderbook state, Bluefin perps internals — flagged for V0.2. Use `dex_sui.trades` for swap-level work today.
 - **Liquidation event paths for Navi** flagged in the skill but not yet sampled — you'll need to discover them via the included discovery query before relying.
 - **Some `event_json` field paths are best-guesses** from SDK code and explicitly flagged with uncertainty disclaimers. The skill instructs Claude to verify by sampling before using.
-- **Historical Navi TVL not yet built.** The path via `sui_tryGetPastObject` is documented but not implemented — see roadmap.
+- **Historical Navi TVL ships in V0.2.** Daily Navi TVL reconstruction via indexed `sui.objects` replay + Pyth Benchmarks historical pricing — live in query `7528506` (the originally-proposed `sui_tryGetPastObject` route was superseded; see `references/protocol-patterns.md` § V0.2).
 - **LiveFetch caveats apply:** 5s timeout per call, ~80 req/s rate limit, no caching across executions. Queries with hundreds of parallel RPC calls may hit limits.
 - **No automated eval suite yet.** Skill quality is validated by the production dashboard it shipped — but there's no automated regression test corpus. V0.2 target.
 
@@ -195,7 +195,7 @@ This is a V0.1 release. Be aware of:
 ### V0.2
 - **Per-DEX protocol patterns** — Cetus concentrated liquidity, DeepBook orderbook state, Bluefin perps. Hybrid approach: `dex_sui.trades` for volume + raw `sui.events` / `sui.objects` for internals.
 - **Pure-Pyth pricing** — discover all 35 Navi asset Pyth feed IDs from Navi's on-chain oracle registry; batch them in one Hermes call. Adds confidence intervals + EMA prices.
-- **Historical Navi TVL** via `sui_tryGetPastObject` snapshots. Date → checkpoint → object version mapping, replayable from any starting point.
+- **Historical Navi TVL** — ✅ delivered in V0.2 via indexed `sui.objects` replay + Pyth Benchmarks (originally proposed via `sui_tryGetPastObject`, superseded). See `references/protocol-patterns.md` § V0.2 and query `7528506`.
 - **Multi-asset Sui lending TVL** — extend beyond BTCfi using a hybrid of `sui_tvl.lending_pools_gold` + raw events.
 - **Eval suite:** corpus of prompts + expected behaviors, run on every skill update.
 

@@ -135,6 +135,8 @@ Discover feed IDs at `https://hermes.pyth.network/v2/price_feeds?query=<symbol>&
 
 **Why Pyth specifically for Sui?** Pyth IS the dominant Sui oracle. Navi, Suilend, Cetus, Bluefin all consume Pyth feeds on-chain. Reading the same source the protocol uses gives you oracle-grade pricing that mirrors what the protocol sees for liquidations.
 
+**For bulk historical pricing** (e.g., 30/90/365 days × multiple feeds), use Pyth Benchmarks' TradingView shim instead — Hermes' `/v2/updates/price/<ts>` rate-limits under parallel load. See `references/sui-data-model.md` § "Bulk historical pricing — Pyth Benchmarks" for the pattern and a worked Navi example.
+
 ### `prices.hour` — Dune's curated price feed
 
 Dune maintains an hourly price table (`prices.hour`) with coverage across most chains. Quirks worth knowing:

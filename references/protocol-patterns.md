@@ -256,9 +256,14 @@ parsed AS (
     cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.id') AS INTEGER) AS asset_id,
     json_extract_scalar(obj_json, '$.data.content.fields.value.fields.coin_type') AS coin_type_full,
     split_part(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.coin_type'), '::', 1) AS addr_raw,
-    -- Navi-9 normalization: total_supply scaled by 1e9 internally regardless of token decimals
-    try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.supply_balance.fields.total_supply') AS DOUBLE) / 1e9 AS supply_native,
-    try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.borrow_balance.fields.total_supply') AS DOUBLE) / 1e9 AS borrow_native,
+    -- Navi-9 normalization: total_supply is SCALED by 1e9 internally regardless of token decimals.
+    -- True native amount = (raw / 1e9) × (index / 1e27). The index is a ray-encoded interest
+    -- accumulator that starts at 1.0 and grows as interest accrues. Skipping the index multiplication
+    -- silently under-reports older reserves by 5-11%.
+    try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.supply_balance.fields.total_supply') AS DOUBLE) / 1e9
+      * try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.current_supply_index') AS DOUBLE) / 1e27 AS supply_native,
+    try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.borrow_balance.fields.total_supply') AS DOUBLE) / 1e9
+      * try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.current_borrow_index') AS DOUBLE) / 1e27 AS borrow_native,
     -- Rate ray-encoding: divide by 1e25 to get APR percent
     try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.current_supply_rate') AS DOUBLE) / 1e25 AS supply_apr_pct,
     try_cast(json_extract_scalar(obj_json, '$.data.content.fields.value.fields.current_borrow_rate') AS DOUBLE) / 1e25 AS borrow_apr_pct,
@@ -411,7 +416,15 @@ ORDER BY supply_usd DESC NULLS LAST
 
 ### Key technical discoveries (validated April 2026)
 
-1. **Navi-9 normalization.** Navi normalizes all `total_supply` values to 9-decimal precision regardless of token decimals. Raw / 1e9 = native amount for all assets — SUI, USDC, xBTC, DEEP all match Navi portal after this divisor.
+1. **Navi-9 normalization + index multiplication.** Navi stores `total_supply` as a SCALED value, normalized to 9-decimal precision regardless of token decimals. To get the actual underlying native amount, two operations are required:
+
+   ```
+   actual_native = (raw_total_supply / 1e9) × (current_supply_index / 1e27)
+   ```
+
+   The `current_supply_index` and `current_borrow_index` fields are ray-encoded interest accumulators (start at 1.0 at reserve genesis, grow over time as interest accrues — same convention as Aave's `liquidityIndex`/`variableBorrowIndex`). Without the index multiplication, supply/borrow for older reserves are silently under-reported by 5–11%: SUI's supply index reached ~1.09 after 3 years at ~2.3% APR; DEEP and WAL drift ~9%.
+
+   The bug hides on recent BTC reserves: enzoBTC, MBTC, xBTC, WBTC (sui_bridge) all have index ≈ 1.00 (low rate × short history), so they appear correct even when the index is skipped. Older + higher-rate reserves are where the discrepancy compounds. Verification approach: sum `supply_usd × ... ` across all reserves and compare to Navi's portal "Total Supply" headline. Pre-fix totals were ~$215M against frontend $243M; post-fix totals match within 0.2%.
 
 2. **Ray-encoded rates.** Rates use 1e27 scaling: `rate / 1e25 = APR percent` (the `/1e25` is `/1e27 * 100`). Same for LTV.
 
@@ -423,10 +436,46 @@ ORDER BY supply_usd DESC NULLS LAST
 
 6. **The `::coin::COIN` problem.** Bridged tokens (wUSDC, wUSDT, WETH, enzoBTC, SOL on Sui) all use a generic `coin` package with module `COIN`. You can't identify them from `coin_type` alone — you must call `suix_getCoinMetadata` to get the canonical symbol. This is why Stage 3 is required.
 
-### What v2 would do (next iteration, not yet built)
+7. **`sui.objects.object_json` JSON paths differ from RPC.** Critical when porting V8-style parsing to historical replay. `sui.objects` strips both the RPC's `$.data.content` wrapper AND all `.fields` indirection — paths become much shorter:
 
-- **Pure-Pyth pricing** instead of `prices.hour` + Pyth hybrid. Read all Pyth feed IDs from Navi's oracle registry on-chain (one extra RPC stage), batch them all in one Hermes call. Gives you confidence intervals (`conf`) and EMA prices.
-- **Historical Navi TVL** via `sui_tryGetPastObject` snapshots. Map dates → checkpoints → object versions, snapshot each reserve once per day. Same 4-stage architecture with a date dimension.
+   | Field | RPC path (V8) | `sui.objects` path (V9.5+) |
+   |-------|---------------|----------------------------|
+   | Supply total | `$.data.content.fields.value.fields.supply_balance.fields.total_supply` | `$.value.supply_balance.total_supply` |
+   | Borrow total | `$.data.content.fields.value.fields.borrow_balance.fields.total_supply` | `$.value.borrow_balance.total_supply` |
+   | Supply index | `$.data.content.fields.value.fields.current_supply_index` | `$.value.current_supply_index` |
+   | Borrow index | `$.data.content.fields.value.fields.current_borrow_index` | `$.value.current_borrow_index` |
+   | Supply rate | `$.data.content.fields.value.fields.current_supply_rate` | `$.value.current_supply_rate` |
+   | Supplier count | `$.data.content.fields.value.fields.supply_balance.fields.user_state.fields.size` | `$.value.supply_balance.user_state.size` |
+   | Coin type | `$.data.content.fields.value.fields.coin_type` | `$.value.coin_type` |
+   | LTV | `$.data.content.fields.value.fields.ltv` | `$.value.ltv` |
+
+   Divisors (`/1e9`, `/1e25`, `/1e27`) carry over identically — only the JSON paths change.
+
+   **`coin_type` formatting also differs:** `sui.objects.object_json` returns `coin_type` without the `0x` prefix (e.g., `"0000...0002::sui::SUI"`), while the RPC response includes `0x`. Apply the same address-canonicalization CASE block from V8 (short-form for system addresses, full-length for normal) on top.
+
+8. **3-package union is events-only.** Navi's 3-package history (pre-Feb-2026, on-behalf-of, post-migration) applies to *events* — the EmitEventCommand source changes when Navi deploys new packages. **Reserve objects are stable across the migration:** all 35 reserves still carry the legacy struct type `0x2::dynamic_field::Field<u8, 0xd899cf7d::storage::ReserveData>` even after the package upgrades. In-place upgrades change event emission, not existing object types. This means historical state replay via `sui.objects` needs **zero** era-handling logic — only event-based queries (activity, flows, liquidations) require the 3-package union.
+
+### V0.2 — Historical replay (DONE, May 2026)
+
+Historical Navi TVL is now solved via **indexed `sui.objects` replay**, not the originally proposed `sui_tryGetPastObject` approach. The pivot was forced by Mysten's public RPC rejecting JSON-RPC 2.0 batching (error `-32005`, verified May 18 2026) — a naive `N days × 35 reserves` parallel-call pipeline would flake at scale.
+
+**Architecture (live in `query_7528506`):**
+
+| Stage | What it does | Cost |
+|-------|--------------|------|
+| 0 | Date dimension via `UNNEST(SEQUENCE(...))` | 0 |
+| 1 | Reserve ID discovery via `suix_getDynamicFields` (same as V8 stage 1) | 1 RPC |
+| 2 | Per-(date, reserve) end-of-day state from `sui.objects` with `ROW_NUMBER() OVER (PARTITION BY date, object_id ORDER BY version DESC)` filtered to `rn = 1` | 0 RPC, ~50–200 credits depending on window |
+| 3 | `suix_getCoinMetadata` for `::coin::COIN` reserves only (~7 calls instead of 35; native-named reserves use the struct name directly) | 7 RPC |
+| 4a | `prices.hour` historical via `DATE(timestamp)` + window function for per-date last-hour price | 0 RPC |
+| 4b | Pyth Benchmarks TradingView shim (one call per feed, returns full window in single response) | 7 HTTP |
+| 5 | Cascade: `prices.hour` → Pyth Benchmarks per-asset → benchmark fallback → `$1` stable → unmatched audit flag | 0 |
+
+**Key constraint reminder:** Mysten's public RPC does NOT support JSON-RPC 2.0 batching. Any pipeline doing `N parallel http_post` calls into `fullnode.mainnet.sui.io` will fail at scale. Indexed `sui.objects` replay sidesteps this completely.
+
+Verified at 90-day scale (3,150 rows) in May 2026; cost ~210 credits per run, matches Navi frontend Total Supply to 0.2%.
+
+- **Pure-Pyth pricing** (still V0.3 if pursued): Read all Pyth feed IDs from Navi's oracle registry on-chain, batch in one Hermes call. Gives confidence intervals (`conf`) and EMA prices.
 
 ### Asset list (Navi mid-2026)
 
@@ -446,7 +495,7 @@ When building comparative dashboards, internalize the asymmetry:
 |-----------|---------|------|
 | TVL (Apr 2026) | ~$192M | ~$235M |
 | USD pre-computed in events? | **Yes** (Pyth in `ReserveAssetDataEvent`) | **No** (raw amounts only) |
-| Historical TVL replay | Trivial via events | Hard — needs `sui_tryGetPastObject` or flow accounting |
+| Historical TVL replay | Trivial via events (USD pre-computed) | Tractable via `sui.objects` indexed replay + Pyth Benchmarks historical (V0.2 of this skill) |
 | Activity model | `obligation_id` (one wallet → many positions) | One wallet ≈ one position |
 | Active positions / wallet | ~10 (LST loops, STEAMM AMM) | ~1 |
 | BTC variant share | ~9% | ~38% (multi-BTC hub) |
@@ -463,6 +512,7 @@ The narrative for a comparative dashboard:
 
 ## Useful Public Dune Query References
 
-- `7377142` — Navi V8 4-stage dynamic pipeline (validated, 100% asset coverage on $235M)
+- `7377142` — Navi V8.1 4-stage dynamic pipeline (current snapshot, validated against Navi portal to 0.2%; **v8.1 May 2026** added index multiplication fix + USDY Pyth feed)
+- `7528506` — **Navi V9.5.2 historical TVL replay** (90-day daily, end-of-day per reserve, via `sui.objects` + Pyth Benchmarks; matches Navi portal Total Supply within 0.2%)
 - `6852115` — Navi daily new vs returning wallets (legitimate Navi query, demonstrates 3-package union)
 - `6852920` — mementomori "Navi daily TVL by asset" (actually Suilend — see investigation note above)
