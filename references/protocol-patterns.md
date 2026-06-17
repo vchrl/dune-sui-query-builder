@@ -163,7 +163,32 @@ Navi's lending storage object (currently shared) holds a dynamic field collectio
 Storage object: 0xe6d4c6610b86ce7735ea754596d71d72d10c7980b5052fc3c8cdf8d09fea9b4b
 ```
 
-This is the entry point for LiveFetch pipelines — call `suix_getDynamicFields` on it to discover all 35 ReserveData child objects.
+This is the entry point for LiveFetch pipelines — call `suix_getDynamicFields` on it to discover all 35 ReserveData child objects. (This is the **Main market** table; isolated markets each have their own — see below.)
+
+### Navi isolated markets (V9, June 2026)
+
+Navi launched **isolated markets** (April–May 2026). Each market is a **separate shared `Storage` object** of the same type `0xd899cf7d…::storage::Storage`, each with its own `reserves: Table<u8, ReserveData>`. Reserve objects are byte-identical across markets — `0x2::dynamic_field::Field<u8, 0xd899cf7d…::storage::ReserveData>` — so one discovery + replay handles all markets; only the parent table differs.
+
+Markets (verified on-chain from the creation transactions, 2026-06-17):
+
+| Market | market_id | Storage object | reserves-table (df parent) | reserves | assets |
+|---|---|---|---|---|---|
+| Main | 0 | `0xbb4e2f4b…442fe` | `0xe6d4c661…9b4b` | 35 | all majors (XAUM #31, suiUSDe #33 live here too) |
+| Ember | 1 | `0xc2b6a52f…cdd90` | `0xb49d02df…eef3c` | 3 | USDC, suiUSDe, eACRED |
+| Matrixdock | 2 | `0x199c1d5c…3ed9f` | `0xb1dc26b8…4894` | 3 | USDC, XAUM (gold), XAGM (silver) |
+| Sui Eco | 3 | `0xdf18372b…7c558` | `0x376c2ee4…3b42` | 7 | SUI, USDC, CETUS, BLUE, HAEDAL, IKA, NS |
+
+Full object IDs:
+- Main — Storage `0xbb4e2f4b6205c2e2a2db47aeb4f830796ec7c005f88537ee775986639bc442fe` / reserves `0xe6d4c6610b86ce7735ea754596d71d72d10c7980b5052fc3c8cdf8d09fea9b4b`
+- Ember — Storage `0xc2b6a52f0da7f91389eaffe4f68f4cacee43aa616bb8a4371118eafaf07cdd90` / reserves `0xb49d02df33f75665aff72ae37195d17f9298e064c7ed62fd0640533be79eef3c`
+- Matrixdock — Storage `0x199c1d5c2d58a4b05bbfa2338d02ad2676572a8a59ac148a5475b5c0fc53ed9f` / reserves `0xb1dc26b806a0a1e45a586e83d7a389040d1368a7e78f2f0debd59be973104894`
+- Sui Eco — Storage `0xdf18372bc9c588b96c7553bc811467a9166ed9be472b40cb45c226175377c558` / reserves `0x376c2ee403d41d327eee462abb97b56cb155ee0cd1ced39598a83b26d19a3b42`
+
+**Discovery (dynamic):** markets are created by `create_new_market()`, which emits `0x1e4a13a0494d5facdbe8473e74127b838c2d446ecec0ce262e2eddafa77259cb::event::MarketCreated { market_id }`. Querying that event type returns the isolated set (currently 3; Main = market_id 0 is created in module `init` and emits **no** event → add it explicitly). The created `Storage` id is in the creation tx's `objectChanges`; its `reserves.id.id` is the reserves table. Full chain (events → `sui_getTransactionBlock` → `sui_getObject` → `suix_getDynamicFields`) is in `examples/navi-v9-multimarket.draft.sql`.
+
+**Re-key requirement (critical):** the `u8` `asset_id` (dynamic-field key) **restarts at 0 in every market** — asset 0 is SUI in Main but USDC in Ember. Key every join on the globally-unique reserve **`object_id`**, never `asset_id`. Live: `market_id` rides on each per-market `sui_multiGetObjects` row (no join-back). Historical: reserves are tagged via a discovery dim joined on `object_id` (decoded `from_hex(substr(id,3))` for `sui.objects.object_id` varbinary). `asset_id` survives only as an informational per-market column. (Interacts with "Key technical discoveries" #9 — the LiveFetch single-reference rule.)
+
+**Coverage:** Main + isolated = 48 reserves; validated vs Navi live figures to ≤0.05% supply, 0.054% borrow, 0.008% net-TVL (live snapshot), and 170 credits / 3,569 rows (90-day historical). Drafts: `examples/navi-v9-multimarket.draft.sql` (live), `examples/navi-v9-multimarket-historical.draft.sql` (historical).
 
 ## Navi Event Type Strings
 
@@ -455,6 +480,11 @@ ORDER BY supply_usd DESC NULLS LAST
 
 8. **3-package union is events-only.** Navi's 3-package history (pre-Feb-2026, on-behalf-of, post-migration) applies to *events* — the EmitEventCommand source changes when Navi deploys new packages. **Reserve objects are stable across the migration:** all 35 reserves still carry the legacy struct type `0x2::dynamic_field::Field<u8, 0xd899cf7d::storage::ReserveData>` even after the package upgrades. In-place upgrades change event emission, not existing object types. This means historical state replay via `sui.objects` needs **zero** era-handling logic — only event-based queries (activity, flows, liquidations) require the 3-package union.
 
+9. **Anti-pattern: DuneSQL re-fires `http_post` in any CTE referenced more than once.** DuneSQL/Trino *inlines* CTEs instead of materializing them, and it does **not** de-duplicate identical LiveFetch calls. So if a CTE whose subtree contains `http_post` is consumed by two downstream branches, every `http_post` in that subtree fires *again* — once per reference, multiplied along each inlining path. The V9 multi-market draft hit this: referencing `reserve_fields` (discovery → `getDynamicFields`) and `parsed_with_addr` (`multiGetObjects`) from two branches each multiplied the discovery fan-out past the per-query LiveFetch cap, even though the logical call count was only ~20.
+   - **Symptom:** `"Your query issued too many HTTP requests"` on a query whose hand-counted calls are well under the cap (or credits/runtime far above the call count).
+   - **Fix:** **Linearize to single-reference** — each `http_post`-bearing CTE consumed exactly once. Carry the join key *on the request row* (per-market `sui_multiGetObjects` fanned out over markets returns rows already tagged with `market_id`) instead of re-joining a discovery CTE downstream; pull any other downstream key (e.g. `asset_id` from `value.fields.id`) out of the response you already fetched, never by re-referencing the fetch.
+   - **The one unavoidable doubling:** `nextCursor` pagination must read page-0's response for BOTH its data rows AND its `hasNextPage`/cursor → 2 references → page-0 (and its discovery ancestors) fire twice. Budget for it: cap the page chain (2 pages today) and keep discovery cheap so even doubled it stays under the cap.
+
 ### V0.2 — Historical replay (DONE, May 2026)
 
 Historical Navi TVL is now solved via **indexed `sui.objects` replay**, not the originally proposed `sui_tryGetPastObject` approach. The pivot was forced by Mysten's public RPC rejecting JSON-RPC 2.0 batching (error `-32005`, verified May 18 2026) — a naive `N days × 35 reserves` parallel-call pipeline would flake at scale.
@@ -475,7 +505,25 @@ Historical Navi TVL is now solved via **indexed `sui.objects` replay**, not the 
 
 Verified at 90-day scale (3,150 rows) in May 2026; cost ~210 credits per run, matches Navi frontend Total Supply to 0.2%.
 
-- **Pure-Pyth pricing** (still V0.3 if pursued): Read all Pyth feed IDs from Navi's oracle registry on-chain, batch in one Hermes call. Gives confidence intervals (`conf`) and EMA prices.
+- **Pure-Pyth pricing** (superseded by V9 on-chain oracle, below): Read all Pyth feed IDs from Navi's oracle registry on-chain, batch in one Hermes call. Gives confidence intervals (`conf`) and EMA prices.
+
+### Navi on-chain PriceOracle (V9 primary pricing)
+
+V8 priced via Pyth Hermes + Dune `prices.hour`. V9 makes Navi's **own on-chain oracle the primary source** — it's the exact price Navi uses for accounting/liquidations, so reconciliation against Navi's portal/API is near-exact, and it has **no null** for metals/RWA where Pyth Benchmarks fails (XAU/XAG).
+
+- Object `0x1568865ed9a0b5ec414220e8f79b3d04c77acc82358f6e5ae4635687392ffbef`, type `0xca441b44…::oracle::PriceOracle`. Field `price_oracles: Table<u8, Price>` (inner table `0xc0601facd3b98d1e82905e660bf9f5998097dedcf86ed802cf485865e3e3667c`) keyed by each reserve's `oracle_id`. Each `Price` = `{ value, decimal, timestamp }`; **USD price = `value / 10^decimal`**.
+- Verified (2026-06): XAUM(31)≈$4,347, XAGM(36)≈$73, eACRED(35)≈$1,100, suiUSDe(33)≈$1 — matches open-api's per-pool `oracle.price` exactly.
+- **Live snapshot (V9):** read the `price_oracles` table directly (getObject → getDynamicFields → one `sui_multiGetObjects`) → `oracle_id → price`. Cheap. The Pyth Hermes CTE is **deleted** (a "fallback" `http_post` still fires every run + carries ~4% flake); `prices.hour` retained as a *free* table-read fallback; `'unmatched'` is the safety tag.
+- **Historical replay (V9):** the oracle's `Price` entries are dynamic-field objects, so daily history is recoverable from `sui.objects`. **But the oracle updates every tick — 90-day version counts are huge (XAUM 313K, eACRED 232K rows).** So the replay is **scoped to the 3 metals/RWA objects Benchmarks can't price**, selected by `WHERE object_id IN (…)` (**not** by `type_`):
+
+  | asset | oracle_id | Price object_id |
+  |---|---|---|
+  | XAUM (gold) | 31 | `0x74f5a7897fbb664bf9e37c76fe1ccb663d39184d9a8487c8ab716160d25ab23c` |
+  | eACRED | 35 | `0x089ff8cc084a74fbc1309944e671da9ce658c4a9999aebf519371a5351c9942a` |
+  | XAGM (silver) | 36 | `0xc9d6a0f4bd6a6e880eee6c334e8c46bceacced637476f9e1ea7e305b66df97a0` |
+
+  Cost: **3 objects = 170 credits** (under the ~230 baseline); replaying all ~37 oracle objects would blow it. Every fed asset stays on `prices.hour → Pyth Benchmarks`. **Maintainer note:** this historical oracle scope is **hardcoded to these three Price object_ids**. A new metals/RWA asset **without a Benchmarks feed** will surface as `unmatched` in the historical replay (fail-loud) until its Price object_id is added to this list.
+- **Never zero-fill:** a missing price (e.g. eACRED 2026-04-15 — a one-day gap in the oracle's own update stream) leaves `price_usd`/`tvl_usd` NULL and `unpriced=true` — surfaced, not silently filled.
 
 ### Asset list (Navi mid-2026)
 
