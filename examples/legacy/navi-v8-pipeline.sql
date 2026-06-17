@@ -1,5 +1,9 @@
 -- =====================================================================
--- Navi 4-Stage Dynamic Pipeline (V8.1)
+-- Navi 4-Stage Dynamic Pipeline (V8.1)  —  LEGACY / SUPERSEDED
+-- Superseded by V9 multi-market + on-chain oracle pricing:
+--   examples/navi-v9-multimarket.sql (live) · examples/navi-v9-multimarket-historical.sql (90-day).
+-- This V8.1 covers the MAIN market only (35 reserves) and prices via Pyth Hermes.
+-- Kept for reference; body unchanged.
 -- =====================================================================
 --
 -- v8.1 (May 2026): INDEX MULTIPLICATION FIX

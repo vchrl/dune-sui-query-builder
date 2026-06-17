@@ -2,7 +2,7 @@
 
 An [agent skill](https://agentskills.io/) for building, debugging, and optimizing **DuneSQL** queries against **Sui** blockchain data — chained Sui RPC and Pyth Hermes patterns that go beyond what indexed tables alone can deliver. Works with Claude, Cursor, OpenCode, Codex, Gemini CLI, and any agent-skill-compatible tool.
 
-![status](https://img.shields.io/badge/status-v0.2.0%20experimental-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![sui](https://img.shields.io/badge/chain-Sui-4DA2FF) ![dune](https://img.shields.io/badge/engine-DuneSQL-F26DB6)
+![status](https://img.shields.io/badge/status-v0.3.1%20experimental-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![sui](https://img.shields.io/badge/chain-Sui-4DA2FF) ![dune](https://img.shields.io/badge/engine-DuneSQL-F26DB6)
 
 ---
 
@@ -21,43 +21,48 @@ Built using this skill in a single weekend:
 **[Sui Lending: Navi vs Suilend — Two Paths to ~$150M TVL](https://dune.com/0x_vcharles/sui-lending-navi-vs-suilend)**
 
 - 15 visualizations, both protocols, fully on-chain
-- 100% asset coverage on Navi's $235M — no third-party indexer
-- The 4-stage on-chain pricing pipeline below — pure SQL + Sui RPC + Pyth, refreshes every execution
+- 100% asset coverage on Navi's lending protocol — no third-party indexer
+- The on-chain pipeline below — pure SQL + Sui RPC + Navi's on-chain oracle (V0.3: all 4 markets, 48 reserves), refreshes every execution
 
-## Architecture: the 4-stage on-chain pipeline
+## Architecture: the on-chain pipeline (V9 — multi-market)
 
-When a protocol's events don't embed USD values (Navi-style — most pre-2026 Sui lending), historical replay is hard. This pipeline solves *current* state from on-chain primitives alone:
+When a protocol's events don't embed USD values (Navi-style — most pre-2026 Sui lending), historical replay is hard. This pipeline solves *current* state from on-chain primitives alone — across **all of Navi's markets** (Main + 3 isolated) since V0.3:
 
 ```mermaid
 flowchart LR
-    Q[Dune Query<br/>Execution] --> S1
+    Q[Dune Query<br/>Execution] --> S0
 
-    subgraph S1[Stage 1: Discovery]
+    subgraph S0[Stage 0: Market Discovery]
         direction TB
-        A[suix_getDynamicFields] --> A2[35 ReserveData<br/>object IDs]
+        M[suix_queryEvents<br/>MarketCreated] --> M2[4 markets: Main + Ember<br/>+ Matrixdock + Sui Eco<br/>discovered dynamically]
+    end
+
+    subgraph S1[Stage 1: Reserve Discovery]
+        direction TB
+        A[suix_getDynamicFields<br/>per market table] --> A2[48 ReserveData<br/>object IDs]
     end
 
     subgraph S2[Stage 2: State Fetch]
         direction TB
-        B[sui_multiGetObjects] --> B2[All 35 reserves<br/>one RPC call<br/>supplies, borrows, rates]
+        B[sui_multiGetObjects<br/>per market] --> B2[48 reserves<br/>supplies, borrows, rates<br/>re-keyed on object_id]
     end
 
-    subgraph S3[Stage 3: Symbol Resolution]
+    subgraph S3[Stage 3: Symbols]
         direction TB
-        C["suix_getCoinMetadata × 35"] --> C2[Canonical symbols<br/>solves the<br/>::coin::COIN problem]
+        C[static coin_type→symbol map<br/>+ struct-name fallback] --> C2[canonical symbols<br/>solves ::coin::COIN<br/>zero RPC]
     end
 
     subgraph S4[Stage 4: Pricing]
         direction TB
-        D[Pyth Hermes API] --> D2[Oracle prices<br/>NAVX, XAUM, ETH<br/>long-tail assets]
+        D[Navi on-chain PriceOracle<br/>oracle_id → value/10^dec] --> D2[primary price<br/>incl. metals/RWA<br/>prices.hour fallback]
     end
 
-    S1 --> S2 --> S3 --> S4 --> R[100% Asset Coverage<br/>$235M, fully dynamic<br/>no indexer, no hardcoded data]
+    S0 --> S1 --> S2 --> S3 --> S4 --> R[all markets · 48 reserves · oracle-priced<br/>no indexer, no hardcoded data]
 ```
 
-Runs entirely from Dune SQL + Sui RPC via `http_post` LiveFetch + Pyth Hermes. No separate indexer, no hardcoded asset list, no hardcoded prices. Refreshes on every query execution.
+Runs entirely from Dune SQL + Sui RPC via `http_post` LiveFetch, priced from **Navi's own on-chain oracle** (the exact source the protocol uses for liquidations; `prices.hour` as a free fallback). No separate indexer, no hardcoded asset list, no hardcoded prices. Refreshes on every query execution. (V8 priced via Pyth Hermes and covered the Main market only — preserved in `examples/legacy/`.)
 
-Full annotated SQL: [`examples/navi-v8-pipeline.sql`](./examples/navi-v8-pipeline.sql) · Reference doc: [`references/protocol-patterns.md`](./references/protocol-patterns.md)
+Full annotated SQL: [`examples/navi-v9-multimarket.sql`](./examples/navi-v9-multimarket.sql) (live) · [`examples/navi-v9-multimarket-historical.sql`](./examples/navi-v9-multimarket-historical.sql) (90-day historical) · Reference doc: [`references/protocol-patterns.md`](./references/protocol-patterns.md)
 
 ## Which Dune source for what?
 
@@ -83,9 +88,11 @@ flowchart TD
     Live -->|Yes, Suilend style| E5[sui.events on<br/>ReserveAssetDataEvent]
     Live -->|No, Navi style| E6[LiveFetch: http_post<br/>to Sui RPC]
 
-    E6 --> P{Token covered by<br/>prices.hour?}
+    E6 --> O{Protocol runs its<br/>own on-chain oracle?}
+    O -->|Yes, Navi V9| E9[Read protocol PriceOracle<br/>oracle_id → value/10^dec<br/>covers metals/RWA]
+    O -->|No| P{Token covered by<br/>prices.hour?}
     P -->|Yes, major tokens| E7[prices.hour<br/>watch double-hex encoding]
-    P -->|No, long-tail| E8[Pyth Hermes via http_get<br/>same oracle protocols use]
+    P -->|No, long-tail| E8[Pyth Hermes / Benchmarks<br/>same oracle protocols use]
 ```
 
 This decision tree, the schema breakdowns, and the anti-patterns are encoded in [`references/sui-data-model.md`](./references/sui-data-model.md); the curated-table branch is fully documented in [`references/sui-curated-tables.md`](./references/sui-curated-tables.md).
@@ -100,10 +107,14 @@ dune-sui-query-builder/
 │   │                              LiveFetch · Pyth Hermes · anti-patterns
 │   ├── sui-curated-tables.md      Curated Sui spell tables · dex_sui.trades schema ·
 │   │                              BTCfi, daily stats, Walrus · when to use curated vs raw
-│   └── protocol-patterns.md       Navi 3-package archaeology · Suilend schemas ·
-│                                  the V8 4-stage pipeline · comparative analysis
+│   └── protocol-patterns.md       Navi 3-package archaeology · isolated markets ·
+│                                  Suilend schemas · V8 + V9 multi-market pipelines ·
+│                                  on-chain oracle pricing · comparative analysis
 └── examples/
-    └── navi-v8-pipeline.sql       Standalone production SQL — copy-paste-ready
+    ├── navi-v9-multimarket.sql            Live multi-market TVL (4 markets, 48 reserves) — primary
+    ├── navi-v9-multimarket-historical.sql 90-day historical replay (scoped on-chain oracle)
+    └── legacy/
+        └── navi-v8-pipeline.sql           V8.1 Main-only, Pyth-priced — superseded by V9
 ```
 
 The three `references/` files are written to **stand alone as documentation** — you don't need to be a Claude user to get value from them. Read them like a technical handbook for analysts working on Sui.
@@ -163,6 +174,14 @@ Three prompts that demonstrate what the skill enables:
 > *"The mementomori 'Navi Protocol' dashboard — is it accurate?"*
 > → Pulls the SQL, decodes the package hexes, confirms it's actually Suilend, outputs an audit.
 
+## What's new in V0.3
+
+- **Multi-market coverage.** The Navi pipeline now spans all 4 markets — Main + the 3 isolated markets (Ember, Matrixdock, Sui Eco) — discovered dynamically from `MarketCreated` events. **48 reserves** total (was 35, Main-only). See `references/protocol-patterns.md` § "Navi isolated markets".
+- **On-chain oracle pricing (primary).** Prices now come from Navi's own on-chain `PriceOracle` (`oracle_id → value / 10^decimal`) — the exact source the protocol uses for liquidations. Covers metals/RWA (XAUM, XAGM, eACRED) that Pyth Benchmarks returns null for. Pyth Hermes is removed from the live query; `prices.hour` stays as a free fallback. See § "Navi on-chain PriceOracle".
+- **Historical replay extended** to all markets, with a cost-scoped on-chain-oracle replay for the 3 metals/RWA Price objects (170 credits, under baseline); fed assets stay on `prices.hour → Pyth Benchmarks`. **Fail-loud** on any unpriced (date, reserve) — never zero-filled.
+- **`object_id` re-key + anti-pattern #9.** Per-market `asset_id` collides across markets, so every reserve join is keyed on the globally-unique `object_id`. New anti-pattern documented: DuneSQL re-fires `http_post` in any CTE referenced more than once → linearize to single-reference.
+- **Validated** vs Navi's live figures: supply ≤0.05%, borrow 0.054%, net-TVL 0.008% (live snapshot); 170 credits / 3,569 rows (90-day historical). Example SQL: [`examples/navi-v9-multimarket.sql`](./examples/navi-v9-multimarket.sql), [`examples/navi-v9-multimarket-historical.sql`](./examples/navi-v9-multimarket-historical.sql).
+
 ## What's solid in V0.1
 
 - Dune Sui table catalog: `sui.events`, `sui.objects`, `sui.move_call`, `sui.transactions`, `sui.move_package`
@@ -194,7 +213,7 @@ This is a V0.1 release. Be aware of:
 
 ### V0.2
 - **Per-DEX protocol patterns** — Cetus concentrated liquidity, DeepBook orderbook state, Bluefin perps. Hybrid approach: `dex_sui.trades` for volume + raw `sui.events` / `sui.objects` for internals.
-- **Pure-Pyth pricing** — discover all 35 Navi asset Pyth feed IDs from Navi's on-chain oracle registry; batch them in one Hermes call. Adds confidence intervals + EMA prices.
+- **On-chain oracle pricing** — ✅ delivered in V0.3, but **not** via the originally-planned pure-Pyth route: Navi's own `PriceOracle` is now the primary price source (covers metals/RWA like XAU/XAG that Pyth can't). See § "What's new in V0.3".
 - **Historical Navi TVL** — ✅ delivered in V0.2 via indexed `sui.objects` replay + Pyth Benchmarks (originally proposed via `sui_tryGetPastObject`, superseded). See `references/protocol-patterns.md` § V0.2 and query `7528506`.
 - **Multi-asset Sui lending TVL** — extend beyond BTCfi using a hybrid of `sui_tvl.lending_pools_gold` + raw events.
 - **Eval suite:** corpus of prompts + expected behaviors, run on every skill update.

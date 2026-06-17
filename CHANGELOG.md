@@ -6,6 +6,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [0.3.1] — 2026-06-17
+
+Docs reconciliation for the V0.3 release — no query/runtime changes.
+
+### Changed
+- **README:** status badge → v0.3.1; the Architecture mermaid rebuilt for the multi-market V9 flow (market discovery → 48 reserves → Stage 4 = Navi on-chain `PriceOracle`, not Pyth Hermes); the "Which Dune source" decision tree gains the protocol on-chain-oracle pricing path; proof-of-value + file tree updated; added a "What's new in V0.3" section.
+- `references/protocol-patterns.md`: forward-pointer from the V8 pipeline section to the V9 multi-market + oracle subsections; reserve-count notes clarified (Main's 35 + isolated).
+- `references/sui-data-model.md`: cross-reference to anti-pattern #9 (http_post CTE re-fire) in the LiveFetch section; current-state reserve count 35 → 48.
+- **Examples reorganized:** `navi-v9-multimarket.sql` and `navi-v9-multimarket-historical.sql` are now the primary examples (dropped the `.draft` suffix — both validated and merged in [0.3.0]); the Main-only Pyth-priced V8.1 query moved to `examples/legacy/navi-v8-pipeline.sql` (preserved, labeled, body unchanged).
+
+## [0.3.0] — 2026-06-17
+
+Navi multi-market TVL (isolated markets) + on-chain oracle pricing.
+
+### Added
+- **Multi-market discovery.** The Navi pipeline now covers all 4 markets — Main + 3 isolated (Ember, Matrixdock, Sui Eco) — discovered dynamically from `0x1e4a13a0…::event::MarketCreated`. Each market is a separate shared `…::storage::Storage` object with its own reserves table; reserve objects are byte-identical across markets. **48 reserves** total (was 35). Full object IDs + the discovery chain in `references/protocol-patterns.md` § "Navi isolated markets".
+- **Navi on-chain `PriceOracle` as primary pricing** (`protocol-patterns.md` § "Navi on-chain PriceOracle"). Object `0x1568865e…`, `price_oracles: Table<u8, Price>` keyed by `oracle_id`; USD = `value / 10^decimal`. The exact source Navi uses for liquidations; matches Navi's open-api `oracle.price`. Covers metals/RWA (XAUM, XAGM, eACRED) that Pyth Benchmarks returns null for.
+- **Anti-pattern #9** (`protocol-patterns.md` § "Key technical discoveries"): DuneSQL re-fires `http_post` in any CTE referenced more than once → "too many HTTP requests" past the ~40 cap even when the logical count is low. Fix: linearize to single-reference, carry the join key (`market_id`) on the row.
+- **`object_id` re-key requirement** documented: per-market `asset_id` (u8) collides across markets (asset 0 is SUI in Main, USDC in Ember); key every reserve join on the globally-unique `object_id`.
+- Two example queries: `examples/navi-v9-multimarket.sql` (live), `examples/navi-v9-multimarket-historical.sql` (90-day).
+
+### Changed
+- **Live pipeline:** Pyth Hermes CTE **deleted** (a "fallback" `http_post` fires every run + carries ~4% flake); `prices.hour` retained as a free table-read fallback; `'unmatched'` is the safety tag.
+- **Historical replay:** extended to all markets; **scoped** on-chain-oracle replay from `sui.objects` for the 3 metals/RWA Price objects (XAUM 31, eACRED 35, XAGM 36) via `WHERE object_id IN (…)` — **170 credits**, under the ~230 baseline (a full-oracle replay would blow it: oracle Price objects churn every tick — XAUM 313K, eACRED 232K versions in 90d). Fed assets stay on `prices.hour → Pyth Benchmarks`. **Never zero-fill:** an unpriced (date, reserve) surfaces fail-loud (`unpriced=true`, NULL).
+
+### Investigation
+- Discovery + data model verified on-chain via Sui RPC + Navi Move source (`create_new_market`, `MarketCreated`). Validated is_temp drafts `7739371` (live) / `7739975` (historical) vs Navi same-moment figures: **supply ≤0.05%, borrow 0.054%, net-TVL 0.008%** (totals); historical **170 credits / 3,569 rows / 4 markets**, 1 fail-loud unpriced row (eACRED 2026-04-15, a one-day gap in the oracle's own update stream).
+- **Production queries `7377142` (live) and `7528506` (historical) are NOT yet promoted** — drafts validated; promotion is a separate pending decision.
+
 ## [0.2.0] — 2026-05-18
 
 Navi historical TVL replay pattern landed; Pyth Benchmarks bulk-historical endpoint documented; critical Navi-9 normalization bug fix.
@@ -107,8 +136,8 @@ Initial public release.
 
 ## Roadmap
 
-### [0.3.0] — planned
-- **Pure-Pyth pricing** replacing the `prices.hour` + Pyth hybrid for the Navi pipeline (discover feed IDs from Navi's on-chain oracle registry, batch in one Hermes call, add confidence intervals + EMA prices)
+### [0.4.0] — planned
+- (On-chain oracle pricing shipped in [0.3.0], superseding the originally-planned pure-Pyth route.)
 - **Audit emerging Sui curated tables** — `dex_sui.trades`, `sui_walrus.*`, `sui_daily.*`, `sui_tvl.*`. Document schemas, coverage, freshness, and integration patterns with raw `sui.events` work.
 - **Cetus protocol patterns** — concentrated liquidity DEX schemas
 - **Bluefin protocol patterns** — perpetuals + orderbook

@@ -1,11 +1,12 @@
 -- =====================================================================
--- Navi V9 Multi-Market Historical TVL (90-day) — DRAFT (validated r2)
--- branch: v0.3.0-isolated-markets   |   is_temp clone of query 7528506
--- Dune draft query: 7739975   (https://dune.com/queries/7739975)
+-- Navi V9 Multi-Market Historical TVL (90-day)  —  validated example
+-- Extends 7528506 to all 4 markets; scoped on-chain-oracle replay for metals/RWA.
+-- Mirrors validated query 7739975; the production historical query is 7528506
+-- (promotion pending).
 -- =====================================================================
 --
 -- Extends 7528506 (V9.6, Main-only) to ALL markets via the same proven
--- multi-market discovery as the live draft (navi-v9-multimarket.draft.sql).
+-- multi-market discovery as the live example (navi-v9-multimarket.sql).
 --
 -- VALIDATION (r2, run 2026-06-17):
 --   * cost 170.261 credits (UNDER the ~230 baseline) | 3,569 rows | 4 markets (0/1/2/3)

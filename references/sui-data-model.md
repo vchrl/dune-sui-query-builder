@@ -307,7 +307,7 @@ Then visually inspect `resp` and write the JSON-extraction logic against the act
 
 ### Parallel HTTP calls per row
 
-If you put `http_get` or `http_post` inside the SELECT of a CTE that has N rows, **the call fires N times in parallel** (subject to rate limits). Useful for batched lookups (e.g. coin metadata for 35 reserves). But: be conscious of the 80 req/s cap — pipelines with hundreds of parallel calls per query may hit limits.
+If you put `http_get` or `http_post` inside the SELECT of a CTE that has N rows, **the call fires N times in parallel** (subject to rate limits). Useful for batched lookups (e.g. coin metadata for 48 reserves). But: be conscious of the 80 req/s cap — pipelines with hundreds of parallel calls per query may hit limits.
 
 ### Limitations to know
 
@@ -408,7 +408,7 @@ For full asset coverage:
 3. If null, fall back to a benchmark price (e.g. BTC for any `*BTC*` variant, SUI for any LST)
 4. Tag the source per row so you can audit coverage
 
-See `references/protocol-patterns.md` for a worked Navi example with cascading fallbacks across all 35 assets.
+See `references/protocol-patterns.md` for a worked Navi example with cascading fallbacks across all 48 assets (Main + 3 isolated markets).
 
 ### Bulk historical pricing — Pyth Benchmarks (not Hermes /v2/updates)
 
@@ -473,7 +473,9 @@ For a worked Navi historical example with 7 feeds × 90 days using Benchmarks, s
 
 ### Dune's per-query HTTP cap
 
-Dune limits a single query to ~40 outbound HTTP calls. Plan accordingly: dynamic-discovery pipelines (multi-stage RPC) plus Pyth fetching can hit this ceiling. The Navi V9.5.2 historical query stays under by (1) restricting `suix_getCoinMetadata` to the 7 `::coin::COIN` reserves that actually need disambiguation rather than all 35, and (2) using Benchmarks one-call-per-feed instead of Hermes one-call-per-(date,feed).
+Dune limits a single query to ~40 outbound HTTP calls. Plan accordingly: dynamic-discovery pipelines (multi-stage RPC) plus Pyth fetching can hit this ceiling. The Navi historical query stays under by (1) restricting `suix_getCoinMetadata` to the `::coin::COIN` reserves that actually need disambiguation (~7) rather than all 48, and (2) using Benchmarks one-call-per-feed instead of Hermes one-call-per-(date,feed).
+
+**Watch the multiplier:** DuneSQL re-fires `http_post`/`http_get` in any CTE referenced more than once, so this cap is easy to blow even when the *logical* call count is low. See `protocol-patterns.md` § "Key technical discoveries" #9 — linearize to single-reference and carry the join key on the row.
 
 ## Performance Best Practices
 

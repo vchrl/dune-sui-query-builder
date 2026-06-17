@@ -1,7 +1,9 @@
 -- =====================================================================
--- Navi V9 Multi-Market Pipeline  —  DRAFT (finalized r3)
--- branch: v0.3.0-isolated-markets   |   is_temp clone of query 7377142
--- Dune draft query: 7739371   (https://dune.com/queries/7739371)
+-- Navi V9 Multi-Market Live TVL  —  validated example (copy-paste-ready)
+-- Extends V8.1 to all 4 markets (Main + Ember + Matrixdock + Sui Eco) with Navi
+-- on-chain oracle pricing. Mirrors validated query 7739371; the production live
+-- query is 7377142 (promotion pending). Legacy V8.1 (Main-only, Pyth-priced):
+-- examples/legacy/navi-v8-pipeline.sql
 -- =====================================================================
 --
 -- Extends V8.1 (Main-only, 35 reserves) to ALL markets discovered on-chain:

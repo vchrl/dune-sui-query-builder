@@ -184,11 +184,11 @@ Full object IDs:
 - Matrixdock — Storage `0x199c1d5c2d58a4b05bbfa2338d02ad2676572a8a59ac148a5475b5c0fc53ed9f` / reserves `0xb1dc26b806a0a1e45a586e83d7a389040d1368a7e78f2f0debd59be973104894`
 - Sui Eco — Storage `0xdf18372bc9c588b96c7553bc811467a9166ed9be472b40cb45c226175377c558` / reserves `0x376c2ee403d41d327eee462abb97b56cb155ee0cd1ced39598a83b26d19a3b42`
 
-**Discovery (dynamic):** markets are created by `create_new_market()`, which emits `0x1e4a13a0494d5facdbe8473e74127b838c2d446ecec0ce262e2eddafa77259cb::event::MarketCreated { market_id }`. Querying that event type returns the isolated set (currently 3; Main = market_id 0 is created in module `init` and emits **no** event → add it explicitly). The created `Storage` id is in the creation tx's `objectChanges`; its `reserves.id.id` is the reserves table. Full chain (events → `sui_getTransactionBlock` → `sui_getObject` → `suix_getDynamicFields`) is in `examples/navi-v9-multimarket.draft.sql`.
+**Discovery (dynamic):** markets are created by `create_new_market()`, which emits `0x1e4a13a0494d5facdbe8473e74127b838c2d446ecec0ce262e2eddafa77259cb::event::MarketCreated { market_id }`. Querying that event type returns the isolated set (currently 3; Main = market_id 0 is created in module `init` and emits **no** event → add it explicitly). The created `Storage` id is in the creation tx's `objectChanges`; its `reserves.id.id` is the reserves table. Full chain (events → `sui_getTransactionBlock` → `sui_getObject` → `suix_getDynamicFields`) is in `examples/navi-v9-multimarket.sql`.
 
 **Re-key requirement (critical):** the `u8` `asset_id` (dynamic-field key) **restarts at 0 in every market** — asset 0 is SUI in Main but USDC in Ember. Key every join on the globally-unique reserve **`object_id`**, never `asset_id`. Live: `market_id` rides on each per-market `sui_multiGetObjects` row (no join-back). Historical: reserves are tagged via a discovery dim joined on `object_id` (decoded `from_hex(substr(id,3))` for `sui.objects.object_id` varbinary). `asset_id` survives only as an informational per-market column. (Interacts with "Key technical discoveries" #9 — the LiveFetch single-reference rule.)
 
-**Coverage:** Main + isolated = 48 reserves; validated vs Navi live figures to ≤0.05% supply, 0.054% borrow, 0.008% net-TVL (live snapshot), and 170 credits / 3,569 rows (90-day historical). Drafts: `examples/navi-v9-multimarket.draft.sql` (live), `examples/navi-v9-multimarket-historical.draft.sql` (historical).
+**Coverage:** Main + isolated = 48 reserves; validated vs Navi live figures to ≤0.05% supply, 0.054% borrow, 0.008% net-TVL (live snapshot), and 170 credits / 3,569 rows (90-day historical). Examples: `examples/navi-v9-multimarket.sql` (live), `examples/navi-v9-multimarket-historical.sql` (historical).
 
 ## Navi Event Type Strings
 
@@ -232,6 +232,8 @@ Merge carefully when unioning — different extraction per branch.
 ## Navi 4-Stage Dynamic Pipeline (V8)
 
 This is the validated production pipeline that achieves 100% asset coverage on a $235M protocol with no third-party indexer, no hardcoded balances, no hardcoded symbols. Refreshes on every query execution.
+
+> **V9 (June 2026) extends this** to all of Navi's markets (Main + 3 isolated → 48 reserves) and switches pricing to Navi's on-chain `PriceOracle`. See § "Navi isolated markets" (above) and § "Navi on-chain PriceOracle" (below); worked queries `examples/navi-v9-multimarket.sql` (live) and `examples/navi-v9-multimarket-historical.sql` (90-day). The V8 description below is Main-only and Pyth-priced (preserved in `examples/legacy/navi-v8-pipeline.sql`).
 
 **Why dynamic:** Navi pre-Feb-2026 events don't include USD values. Without LiveFetch, you can't reconstruct current TVL from indexed tables alone. The 4-stage pipeline solves this entirely from on-chain primitives.
 
