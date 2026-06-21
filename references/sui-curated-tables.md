@@ -96,6 +96,22 @@ WHERE token_sold_symbol = 'USDC'
 
 Always include `block_month` (or `block_date` for narrower windows) in the WHERE.
 
+### `dex_sui.trades` as a long-tail price source
+
+For a token with no oracle feed and no `prices.*` coverage (thin or brand-new assets), `dex_sui.trades` is the on-chain price of record. It already carries per-side USD (`token_sold_usd`, `token_bought_usd`) and per-side amounts, so a daily volume-weighted average price comes straight out of it.
+
+Recipe, for the side the token sits on:
+```sql
+sum(case when <token is this side> then side_usd end)
+  / nullif(sum(case when <token is this side> then side_amount end), 0) AS vwap_usd
+```
+
+Two rules that matter:
+- **Match the token by address, not symbol.** Use `address LIKE '%<hex>%'` on both `token_sold_address` and `token_bought_address`; symbols are inconsistent across DEXs, but the coin-type hex is stable.
+- **Always filter `block_month`** to prune the partition, even when the analysis window is keyed on `block_date`.
+
+The worked case is the Suilend IKA bad-debt reconstruction in `examples/suilend-ika-bad-debt.sql` (Dune query 7757951): IKA had no oracle feed, so its daily price came from this VWAP, joined to the priced liquidation matview. This is step 2 of the Sui pricing decision tree in `sui-data-model.md`.
+
 ## `sui_tvl.btc_ecosystem` and the `_gold` intermediates
 
 A composite table tracking how BTC and BTC-pegged assets (xBTC, wBTC, enzoBTC, LBTC, stBTC, MBTC, YBTC, etc.) are used across Sui DeFi — DEX pools, lending markets, supply registries. Rolls up three intermediate `_gold` tables.

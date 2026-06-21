@@ -15,8 +15,9 @@ Official docs: https://docs.dune.com/data-catalog/sui/overview (append `.md` for
 7. [Sui-specific edge cases](#sui-specific-edge-cases)
 8. [LiveFetch — Sui RPC inside SQL](#livefetch--sui-rpc-inside-sql)
 9. [Pricing — `prices.hour` and Pyth Hermes](#pricing--priceshour-and-pyth-hermes)
-10. [Performance best practices](#performance-best-practices)
-11. [Anti-patterns](#anti-patterns-observed-in-real-dashboards)
+10. [Materialized views as a serving layer](#materialized-views-as-a-serving-layer)
+11. [Performance best practices](#performance-best-practices)
+12. [Anti-patterns](#anti-patterns-observed-in-real-dashboards)
 
 ## Critical Conceptual Difference vs EVM and Solana
 
@@ -318,7 +319,21 @@ If you put `http_get` or `http_post` inside the SELECT of a CTE that has N rows,
 
 ## Pricing — `prices.hour` and Pyth Hermes
 
-Sui-token pricing has two main sources, used together for full coverage.
+### Pricing source decision tree for Sui
+
+Order of preference, most accurate first:
+
+1. **Protocol-emitted USD fields** (most accurate, no decimal assumptions). When a protocol writes USD into its own events or oracle (Suilend's `*_usd_estimate` in `ReserveAssetDataEvent`, Navi's on-chain `PriceOracle`), read that. The scaling cancels and it matches the price the protocol liquidates against.
+2. **`dex_sui.trades` VWAP** for tokens with no oracle feed (thin or brand-new tokens). Daily VWAP recipe and address matching are in `sui-curated-tables.md`; the worked case is the Suilend IKA bad-debt reconstruction.
+3. **Pyth Hermes / Benchmarks** for historical long-tail (Hermes rate-limits at roughly 20-30 parallel calls; Benchmarks `/v1/shims/tradingview/history` for bulk).
+
+Do not rely on Dune `prices.*` for Sui. It does not cover Sui reliably. The double-hex join encoding (documented below) is the right technique if a token does exist there, but coverage, not syntax, is the blocker.
+
+The two table-based sources below (`prices.hour`, Pyth Hermes) sit at steps 2 and 3 of this order. Lead with protocol-emitted USD whenever the protocol provides it.
+
+### Two table-based sources
+
+Beyond protocol-emitted USD, Sui-token pricing has two table-based sources, used together for coverage.
 
 ### `prices.hour` (Dune-curated)
 
@@ -402,11 +417,13 @@ SELECT * FROM pyth_prices
 
 ### Hybrid pricing strategy
 
-For full asset coverage:
-1. Try `prices.hour` (Sui chain) on the canonical address
-2. If null, fall back to Pyth Hermes feed for the asset
-3. If null, fall back to a benchmark price (e.g. BTC for any `*BTC*` variant, SUI for any LST)
-4. Tag the source per row so you can audit coverage
+For full asset coverage, following the decision tree above:
+1. Use protocol-emitted USD (Suilend `*_usd_estimate`, Navi `PriceOracle`) when the protocol provides it
+2. Else try `prices.hour` (Sui chain) on the canonical address
+3. Else use a `dex_sui.trades` VWAP for tokens with no oracle feed
+4. Else fall back to a Pyth Hermes feed for the asset
+5. Else fall back to a benchmark price (e.g. BTC for any `*BTC*` variant, SUI for any LST)
+6. Tag the source per row so you can audit coverage
 
 See `references/protocol-patterns.md` for a worked Navi example with cascading fallbacks across all 48 assets (Main + 3 isolated markets).
 
@@ -476,6 +493,18 @@ For a worked Navi historical example with 7 feeds × 90 days using Benchmarks, s
 Dune limits a single query to ~40 outbound HTTP calls. Plan accordingly: dynamic-discovery pipelines (multi-stage RPC) plus Pyth fetching can hit this ceiling. The Navi historical query stays under by (1) restricting `suix_getCoinMetadata` to the `::coin::COIN` reserves that actually need disambiguation (~7) rather than all 48, and (2) using Benchmarks one-call-per-feed instead of Hermes one-call-per-(date,feed).
 
 **Watch the multiplier:** DuneSQL re-fires `http_post`/`http_get` in any CTE referenced more than once, so this cap is easy to blow even when the *logical* call count is low. See `protocol-patterns.md` § "Key technical discoveries" #9 — linearize to single-reference and carry the join key on the row.
+
+## Materialized views as a serving layer
+
+When a query does one expensive priced pass over events (decode, join to reserve snapshots, price every row), do that pass once and write the result to a `result_*` materialized view. Every downstream visualization then reads the matview cheaply instead of re-running the priced pass. The Suilend liquidations query (`examples/suilend-liquidations-priced.sql`) feeds the matview `dune."0x_vcharles".result_suilend_liquidations`, and the IKA bad-debt query reads that matview rather than re-pricing.
+
+Reality to document honestly:
+
+- **Creation is not free.** A matview needs the `medium` execution tier. The Suilend matview cost about 117 credits to build. Do not quote small-tier prices for it.
+- **No automatic refresh** unless you set a cron. A refresh re-runs the full upstream priced pass and re-costs roughly the same as the first build.
+- **Gate before you materialize:** `createDuneQuery(is_temp=false)` -> `executeQueryById` -> `getExecutionResults` -> validate against ground truth (see the verification toolkit) -> `createMaterializedView`.
+
+Contrast with reading a `query_<id>` reference: that does not cache, it re-executes the upstream SQL as a CTE on every read (one observed run cost 244 credits). For a stable, repeatedly-read result, a matview is the real serving layer. See the anti-pattern list.
 
 ## Performance Best Practices
 
