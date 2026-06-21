@@ -25,6 +25,18 @@ Built using this skill in a single weekend:
 - The on-chain pipeline below — pure SQL + Sui RPC + Navi's on-chain oracle (V0.3: all 4 markets, 48 reserves), refreshes every execution
 - Suilend liquidations priced with protocol-native cToken USD (98,081 events at the example run on 2026-06-19, an illustrative snapshot rather than a live count), and the IKA bad-debt episode reconstructed on-chain (V0.4: the two `examples/suilend-*.sql`)
 
+**[Navi protocol: A verified approach](https://dune.com/0x_vcharles/navi-protocol-a-verified-approach)**
+
+- All four isolated Navi markets and every reserve, priced on Navi's own on-chain oracle, no third-party indexer
+- Tracks the migration from the old shared pool into the isolated markets, day by day
+- Pure SQL plus Sui RPC, refreshes on every execution
+
+**[Suilend Liquidations and Bad Debt: the historical record](https://dune.com/0x_vcharles/suilend-liquidations-and-bad-debt-the-historical-record)**
+
+- Every Suilend liquidation since launch, priced with protocol-native cToken USD
+- The one bad-debt episode in its history (IKA, September 2025) reconstructed on-chain from ForgiveEvent and DEX prices
+- Reads from a materialized view, with the methodology and a verification record on the dashboard itself
+
 ## Architecture: the on-chain pipeline (V9 — multi-market)
 
 When a protocol's events don't embed USD values (Navi-style — most pre-2026 Sui lending), historical replay is hard. This pipeline solves *current* state from on-chain primitives alone — across **all of Navi's markets** (Main + 3 isolated) since V0.3:
@@ -255,7 +267,7 @@ Sui's DeFi data on Dune is uneven — strong curated coverage for DEX swaps, BTC
 
 Public because the methodology is useful for anyone analyzing Sui on Dune, and the work belongs somewhere the next person can find it.
 
-Built by [Vincent Charles](https://github.com/vchrl) — independent blockchain data analyst (Unchain Data; previously: Binance, Morpho Labs, Orca). Built with [Claude](https://www.anthropic.com/claude) + [Dune MCP](https://docs.dune.com/api-reference/agents/mcp).
+Built by [Vincent Charles](https://github.com/vchrl) — independent blockchain data analyst ([Unchain Data](https://unchaindata.xyz/dune-dashboards); previously: Binance, Morpho Labs, Orca). Built with [Claude](https://www.anthropic.com/claude) + [Dune MCP](https://docs.dune.com/api-reference/agents/mcp).
 
 ## Contributing
 
@@ -284,3 +296,7 @@ MIT — see [LICENSE](./LICENSE)
 ---
 
 *Found a bug? Open an issue. Built something with it? Tag [@0x_vcharles](https://x.com/0x_vcharles) — would love to see.*
+
+---
+
+Built by Vincent Charles, Unchain Data. I build reconciled, defensible on-chain dashboards for Sui and EVM protocols, the kind this skill is designed to produce. Need one for your protocol? [unchaindata.xyz/dune-dashboards](https://unchaindata.xyz/dune-dashboards)
