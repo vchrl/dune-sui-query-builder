@@ -598,3 +598,40 @@ LEFT JOIN prices.hour pl ON pl.contract_address_varchar = canonical_addr
 -- GOOD:
 LEFT JOIN prices.hour pl ON pl.contract_address_varchar = '0x' || to_hex(to_utf8(canonical_addr))
 ```
+
+### Anti-pattern 9: Treating cTokens / share tokens as underlying
+
+Lending protocols emit balances in share units (Suilend cTokens, Navi supply-index amounts), not underlying. Treating a share amount as an underlying amount mis-reports systematically: onchainiq did this on Suilend, and Navi pre-v0.2 of this skill under-reported by 5-11%.
+
+**Do instead:** derive USD-per-share from a supply and a supply-USD pair on the same object. See `protocol-patterns.md` § "Share-token vs underlying pricing (cross-protocol)".
+
+### Anti-pattern 10: Using `seized_usd / repaid_usd` as the liquidation penalty
+
+Collateral is oracle-valued on daily snapshots that lag intraday cascade prices, so the aggregate seized-USD / repaid-USD ratio runs near 1.2 all-time (about 1.197) and overstates the penalty.
+
+**Do instead:** compute the realized penalty from price-independent cToken quantity proportions (about 6%). See the verification toolkit, check 3.
+
+### Anti-pattern 11: Assuming `prices.*` covers Sui
+
+`prices.*` does not cover Sui reliably. Joining to it for long-tail Sui tokens yields null joins or fabricated prices.
+
+**Do instead:** protocol-emitted USD first, then `dex_sui.trades` VWAP, then Pyth. The double-hex join in anti-pattern 8 is the correct syntax if a token does exist there, but coverage, not syntax, is the blocker. See the pricing decision tree above.
+
+### Anti-pattern 12: Reading `query_<id>` as a cheap cache
+
+A `query_<id>` reference does not cache. It re-executes the upstream SQL as a CTE on every read; one observed run cost 244 credits.
+
+**Do instead:** build a materialized view as the real serving layer. See § "Materialized views as a serving layer".
+
+### Anti-pattern 13: Trusting `searchTables` to enumerate all spellbook models
+
+`searchTables` Spell/Sui filters miss queryable dbt models, so it under-reports what is actually available.
+
+**Do instead:** probe with `createDuneQuery` + `getExecutionResults` for schema discovery, as done for the `sui_tvl.*_gold` intermediates in `sui-curated-tables.md`.
+
+### Already documented elsewhere (do not duplicate)
+
+- **`http_post` in a CTE referenced more than once re-fires the LiveFetch call**, hitting per-query HTTP caps. Linearize to single-reference CTEs. Full write-up in `protocol-patterns.md` § "Key technical discoveries" #9.
+- **Batch JSON-RPC 2.0 on Mysten's public RPC is rejected** with `-32005`; there is no batch workaround on the public endpoint. See `protocol-patterns.md` § "V0.2 — Historical replay".
+- **Surfacing raw outlier-laden sums** (Suilend's raw `deposited_value_usd` reaches about $21.2B) produces garbage. Guard outliers or use a weighted field. Detail in `protocol-patterns.md` § Suilend data-quality gotcha.
+- **Setting duplicate-x aggregation (Sum vs Pick first) via the API** is not supported and has caused a TVL undercount; set it in the Dune UI. This is a dashboard mechanic, covered in the README dashboard companion note.
