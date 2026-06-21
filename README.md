@@ -2,7 +2,7 @@
 
 An [agent skill](https://agentskills.io/) for building, debugging, and optimizing **DuneSQL** queries against **Sui** blockchain data — chained Sui RPC and Pyth Hermes patterns that go beyond what indexed tables alone can deliver. Works with Claude, Cursor, OpenCode, Codex, Gemini CLI, and any agent-skill-compatible tool.
 
-![status](https://img.shields.io/badge/status-v0.3.1%20experimental-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![sui](https://img.shields.io/badge/chain-Sui-4DA2FF) ![dune](https://img.shields.io/badge/engine-DuneSQL-F26DB6)
+![status](https://img.shields.io/badge/status-v0.4.0%20experimental-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![sui](https://img.shields.io/badge/chain-Sui-4DA2FF) ![dune](https://img.shields.io/badge/engine-DuneSQL-F26DB6)
 
 ---
 
@@ -23,6 +23,7 @@ Built using this skill in a single weekend:
 - 15 visualizations, both protocols, fully on-chain
 - 100% asset coverage on Navi's lending protocol — no third-party indexer
 - The on-chain pipeline below — pure SQL + Sui RPC + Navi's on-chain oracle (V0.3: all 4 markets, 48 reserves), refreshes every execution
+- Suilend liquidations (98,081 events from 2024-03-13) priced with protocol-native cToken USD, and the IKA bad-debt episode reconstructed on-chain (V0.4: the two `examples/suilend-*.sql`)
 
 ## Architecture: the on-chain pipeline (V9 — multi-market)
 
@@ -95,6 +96,8 @@ flowchart TD
     P -->|No, long-tail| E8[Pyth Hermes / Benchmarks<br/>same oracle protocols use]
 ```
 
+For a thin token with no oracle feed, a `dex_sui.trades` daily VWAP sits between protocol-emitted USD and Pyth as the long-tail price source (the Suilend IKA reconstruction uses exactly this).
+
 This decision tree, the schema breakdowns, and the anti-patterns are encoded in [`references/sui-data-model.md`](./references/sui-data-model.md); the curated-table branch is fully documented in [`references/sui-curated-tables.md`](./references/sui-curated-tables.md).
 
 ## What's in the box
@@ -103,21 +106,23 @@ This decision tree, the schema breakdowns, and the anti-patterns are encoded in 
 dune-sui-query-builder/
 ├── SKILL.md                       Task router: Build / Debug / Optimize / Investigate
 ├── references/
-│   ├── sui-data-model.md          Dune Sui table catalog · 8 edge cases ·
-│   │                              LiveFetch · Pyth Hermes · anti-patterns
-│   ├── sui-curated-tables.md      Curated Sui spell tables · dex_sui.trades schema ·
+│   ├── sui-data-model.md          Dune Sui table catalog · 13 edge cases / anti-patterns ·
+│   │                              LiveFetch · pricing decision tree · matview serving layer
+│   ├── sui-curated-tables.md      Curated Sui spell tables · dex_sui.trades schema + VWAP ·
 │   │                              BTCfi, daily stats, Walrus · when to use curated vs raw
-│   └── protocol-patterns.md       Navi 3-package archaeology · isolated markets ·
-│                                  Suilend schemas · V8 + V9 multi-market pipelines ·
-│                                  on-chain oracle pricing · comparative analysis
+│   ├── protocol-patterns.md       Navi 3-package archaeology · isolated markets · V8 + V9
+│   │                              pipelines · Suilend pack: liquidations, cToken pricing, IKA
+│   └── verification-toolkit.md    Raw-events recount · stablecoin cross-check · cToken penalty
 └── examples/
     ├── navi-v9-multimarket.sql            Live multi-market TVL (4 markets, 48 reserves) — primary
     ├── navi-v9-multimarket-historical.sql 90-day historical replay (scoped on-chain oracle)
+    ├── suilend-liquidations-priced.sql    Suilend liquidations priced per event (matview source, q7756564)
+    ├── suilend-ika-bad-debt.sql           IKA bad debt: dex_sui.trades VWAP vs liquidations (q7757951)
     └── legacy/
         └── navi-v8-pipeline.sql           V8.1 Main-only, Pyth-priced — superseded by V9
 ```
 
-The three `references/` files are written to **stand alone as documentation** — you don't need to be a Claude user to get value from them. Read them like a technical handbook for analysts working on Sui.
+The four `references/` files are written to **stand alone as documentation** — you don't need to be a Claude user to get value from them. Read them like a technical handbook for analysts working on Sui.
 
 ## How this fits with Dune's tooling
 
@@ -137,6 +142,18 @@ Dune ships its own [agent skill](https://github.com/duneanalytics/skills), [MCP 
 Recommended stack: **Dune MCP/Skill/CLI for execution + this skill for Sui domain knowledge + your agent of choice** (Claude, Cursor, Codex, Gemini CLI — anything agent-skill-compatible).
 
 The `references/` markdown files are also usable as plain documentation by humans — no agent required.
+
+## Companion: building the dashboard
+
+Putting these queries on a public Dune dashboard is mostly not Sui-specific, so the skill body stays SQL-focused and the generic mechanics route to [Dune's official skill](https://github.com/duneanalytics/skills). Notes worth carrying:
+
+- Mermaid does render inside Dune text widgets.
+- `updateDashboard` is all-or-nothing, so always `getDashboard` first and send the full state back.
+- The layout grid is 6 columns. An Ilemi-style left explainer beside each chart, with numbered full-width section separators, reads well.
+- Only promoted (non-temp) queries render on a public dashboard.
+- Duplicate-x aggregation (Sum vs Pick first) is not settable via the API and has caused a TVL undercount; set it in the Dune UI.
+
+The one presentation detail that is Sui-specific lives in the skill, not here: clickable account cells via `get_href('https://suiscan.xyz/mainnet/account/' || addr || '/portfolio', addr)` (see `references/protocol-patterns.md`).
 
 ## Installation
 
@@ -159,7 +176,7 @@ Adjust the destination path per your agent's skill directory convention. The ski
 
 ### As reference documentation (no agent needed)
 
-Just read `references/sui-data-model.md`, `references/sui-curated-tables.md`, and `references/protocol-patterns.md` directly. They were written to be skimmable for someone debugging at 2am — schema breakdowns, full SQL examples, anti-patterns observed in real production dashboards.
+Just read `references/sui-data-model.md`, `references/sui-curated-tables.md`, `references/protocol-patterns.md`, and `references/verification-toolkit.md` directly. They were written to be skimmable for someone debugging at 2am — schema breakdowns, full SQL examples, anti-patterns observed in real production dashboards.
 
 ## Quick start
 
@@ -173,6 +190,15 @@ Three prompts that demonstrate what the skill enables:
 
 > *"The mementomori 'Navi Protocol' dashboard — is it accurate?"*
 > → Pulls the SQL, decodes the package hexes, confirms it's actually Suilend, outputs an audit.
+
+## What's new in V0.4
+
+- **Suilend protocol pack.** `references/protocol-patterns.md` now carries Suilend the same way it carries Navi: multi-market identity (`reserve_id` as the join key), the `event_json` conventions, the liquidation/obligation/forgive event catalog, and protocol-native pricing. Two standalone queries ship as examples: [`examples/suilend-liquidations-priced.sql`](./examples/suilend-liquidations-priced.sql) (Dune query 7756564, the matview source) and [`examples/suilend-ika-bad-debt.sql`](./examples/suilend-ika-bad-debt.sql) (Dune query 7757951).
+- **cToken pricing as the correctness core.** Suilend emits seized collateral, protocol fee, and liquidator bonus in cTokens, not underlying. The pack states the USD-per-cTOKEN derivation (`supply_amount_usd_estimate / ctoken_supply`) and generalizes it to a cross-protocol share-token rule alongside Navi's supply-index.
+- **`dex_sui.trades` as the long-tail price source.** A daily VWAP recipe with address-LIKE matching, documented in `references/sui-curated-tables.md` and worked through in the IKA bad-debt case (the only `ForgiveEvent` episode in Suilend history).
+- **Materialized-view serving layer.** One expensive priced pass writes a `result_*` matview; downstreams read it cheaply. Documented with honest tier/cost/refresh notes and the `createMaterializedView` gate in `references/sui-data-model.md`.
+- **Verification toolkit.** New `references/verification-toolkit.md`: raw-events recount, stablecoin face-value cross-check, and the price-independent cToken penalty ratio, substituting for the price-table cross-check Sui cannot provide.
+- **Anti-patterns expanded and pricing reordered.** Five new anti-patterns; Sui pricing guidance now leads with protocol-emitted USD and `dex_sui.trades`. A new dashboard companion note routes generic Dune mechanics to the official Dune skill.
 
 ## What's new in V0.3
 

@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [0.4.0] - 2026-06-21
+
+Suilend protocol pack, share-token pricing as a general rule, a materialized-view serving layer, `dex_sui.trades` as the long-tail price source, and a verification toolkit.
+
+### Added
+- **Suilend protocol pack** (`references/protocol-patterns.md`): multi-market identity with `reserve_id` as the join key, the `event_json` conventions, the liquidation / obligation / forgive event catalog, protocol-native USD pricing including the cToken-vs-underlying distinction (the correctness core), the wrapped-token symbol map, the raw `deposited_value_usd` outlier gotcha (~$21.2B), and the IKA bad-debt episode (the only `ForgiveEvent` in Suilend history) as a worked case study.
+- **Two Suilend example queries**: `examples/suilend-liquidations-priced.sql` (Dune query 7756564, the materialized-view source, 98,081 liquidations from 2024-03-13) and `examples/suilend-ika-bad-debt.sql` (Dune query 7757951).
+- **Share-token vs underlying pricing** as a cross-protocol rule: Suilend cTokens via `supply_amount_usd_estimate / ctoken_supply`, Navi supply-index via `(raw/1e9) × (index/1e27)`.
+- **`dex_sui.trades` as the long-tail Sui price source** (`references/sui-curated-tables.md`): daily VWAP recipe with address-LIKE matching on both side-address columns.
+- **Materialized-view serving-layer pattern** (`references/sui-data-model.md`): one priced pass feeds a `result_*` matview, with honest tier (medium), cost (~117 credits), and refresh notes, plus the `createMaterializedView` gate.
+- **Verification toolkit** (`references/verification-toolkit.md`, new file): raw-events recount (98,081 / 15,710 / 204, zero diff), stablecoin face-value cross-check (~0.05%), and the price-independent cToken penalty ratio (~6% realized versus the ~1.2 all-time USD ratio).
+- **Pricing decision tree for Sui** (`references/sui-data-model.md`): protocol-emitted USD, then `dex_sui.trades` VWAP, then Pyth, with the `prices.*` coverage caveat.
+- **Dashboard companion note** (README): generic Dune dashboard mechanics routed to Dune's official skill; the Suiscan `get_href` helper kept in the skill.
+
+### Changed
+- **Anti-patterns expanded** (`references/sui-data-model.md`): five new entries (share-tokens-as-underlying, seized/repaid as penalty, assuming `prices.*` covers Sui, `query_<id>` as cache, `searchTables` enumeration) plus a dedup block pointing at the already-documented items.
+- **Pricing guidance now leads with protocol-emitted USD and `dex_sui.trades`** for Sui, across `SKILL.md` and `references/sui-data-model.md`.
+- **README**: status badge to v0.4.0; "What's new in V0.4" section; file tree and proof-of-value updated for the Suilend pack and the fourth reference file.
+
+### Notes
+- Eval suite and additional protocol coverage deferred to [0.5.0].
+
 ## [0.3.1] — 2026-06-17
 
 Docs reconciliation for the V0.3 release — no query/runtime changes.
@@ -136,12 +158,12 @@ Initial public release.
 
 ## Roadmap
 
-### [0.4.0] — planned
-- (On-chain oracle pricing shipped in [0.3.0], superseding the originally-planned pure-Pyth route.)
-- **Audit emerging Sui curated tables** — `dex_sui.trades`, `sui_walrus.*`, `sui_daily.*`, `sui_tvl.*`. Document schemas, coverage, freshness, and integration patterns with raw `sui.events` work.
-- **Cetus protocol patterns** — concentrated liquidity DEX schemas
-- **Bluefin protocol patterns** — perpetuals + orderbook
-- **Automated eval suite** — corpus of prompts + expected behaviors
+### [0.5.0] - planned
+- **Automated eval suite**: corpus of prompts + expected behaviors, run on every skill update.
+- **Audit emerging Sui curated tables**: `sui_walrus.*`, `sui_daily.*`, `sui_tvl.*` schemas, coverage, and freshness (the `dex_sui.trades` price-source path landed in [0.4.0]).
+- **Cetus protocol patterns**: concentrated liquidity DEX schemas.
+- **Bluefin protocol patterns**: perpetuals + orderbook.
+- **Evaluate Navi's MCP** ([naviprotocol.gitbook.io](https://naviprotocol.gitbook.io)) as a cross-check-only source against the on-chain pipeline, not a data dependency.
 
 ### Future
 - Additional protocols: Scallop, DeepBook, Aftermath, Volo, Haedal
