@@ -6,11 +6,12 @@ Protocol-specific reference for building Dune queries against the two largest Su
 
 1. [The mementomori mislabel investigation](#the-mementomori-mislabel-investigation)
 2. [Suilend overview & patterns](#suilend-overview--patterns)
-3. [Navi overview & the three-package problem](#navi-overview--the-three-package-problem)
-4. [Navi event type strings](#navi-event-type-strings)
-5. [Navi 4-stage dynamic pipeline (V8)](#navi-4-stage-dynamic-pipeline-v8)
-6. [Comparing Suilend vs Navi](#comparing-suilend-vs-navi)
-7. [Useful public Dune query references](#useful-public-dune-query-references)
+3. [Share-token vs underlying pricing (cross-protocol)](#share-token-vs-underlying-pricing-cross-protocol)
+4. [Navi overview & the three-package problem](#navi-overview--the-three-package-problem)
+5. [Navi event type strings](#navi-event-type-strings)
+6. [Navi 4-stage dynamic pipeline (V8)](#navi-4-stage-dynamic-pipeline-v8)
+7. [Comparing Suilend vs Navi](#comparing-suilend-vs-navi)
+8. [Useful public Dune query references](#useful-public-dune-query-references)
 
 ## The mementomori Mislabel Investigation
 
@@ -43,6 +44,24 @@ Modules: lending_market, reserve, obligation
 Main pool ID: 0x84030d26d85eaa7035084a057f2f11f701b7e2e4eda87551becbc7c97505ece1
 ```
 
+#### Markets and the reserve join key
+
+Suilend runs more than one lending market under the same package. Observed markets:
+
+| Market | lending_market_id | Notes |
+|---|---|---|
+| Main | `0x84030d26d85eaa7035084a057f2f11f701b7e2e4eda87551becbc7c97505ece1` | >99.9% of activity |
+| Matrixdock Gold | `0x8a8d8e13...` | XAUM collateral |
+| Isolated | `0xe4374f26...` | one liquidation in history |
+
+Join events on `reserve_id` (the reserve object id), not on a coin symbol. The same asset can appear across markets, so a symbol is not a stable key.
+
+#### event_json conventions (Suilend specifics)
+
+- Field names are snake_case in `event_json`, not the SDK's camelCase.
+- Address-typed JSON fields carry a `0x` prefix. Coin types read through `.name` (a Move `TypeName`) carry no `0x` prefix.
+- USD and decimal fields are wrapped as `{ value: ... }` and scaled by 1e18.
+
 State events (TVL, rates, available liquidity):
 - `<pkg>::reserve::ReserveAssetDataEvent` — emitted ~hourly per asset, contains pre-computed USD estimates
 
@@ -68,7 +87,11 @@ $.supply_amount_usd_estimate.value    → USD estimate, scaled by 1e18
 $.borrowed_amount_usd_estimate.value  → USD estimate, scaled by 1e18
 $.supply_apr.value                    → APR, scaled by 1e18
 $.borrow_apr.value                    → APR, scaled by 1e18
+$.ctoken_supply                       → cTOKEN supply, plain u64, NOT 1e18-scaled
+$.price.value                         → reserve price, scaled by 1e18
 ```
+
+`ctoken_supply` is the field that makes share-token pricing work (next subsection). Note it is a plain u64 and is not wrapped in the `{value}` 1e18 Decimal, unlike every amount field above it.
 
 **Important:** Suilend uses an internal `Decimal` type that scales everything by `1e18`. Native amounts also need division by token decimals on top:
 ```sql
@@ -131,6 +154,79 @@ WHERE date >= CURRENT_DATE - INTERVAL '14' DAY
 ```
 
 Note: Suilend's `obligation_id` is the equivalent of an account/position, and one wallet can hold multiple obligations (e.g. ~10 per wallet via STEAMM AMM and LST loops). Use `obligation_id` for "positions," `sender` for "wallets."
+
+### Suilend event catalog (liquidations, obligations, write-offs)
+
+Beyond the state/activity events above, three events carry the liquidation and bad-debt story. Field names are snake_case; see the event_json conventions noted earlier.
+
+| Event | Key fields | Notes |
+|---|---|---|
+| `lending_market::LiquidateEvent` | `lending_market_id`, `repay_reserve_id`, `withdraw_reserve_id`, `obligation_id`, `repay_coin_type.name`, `withdraw_coin_type.name`, `repay_amount`, `withdraw_amount`, `protocol_fee_amount`, `liquidator_bonus_amount` | `repay_amount` is u64 in the repaid asset's underlying. `withdraw_amount`, `protocol_fee_amount`, `liquidator_bonus_amount` are u64 in **cTokens of the withdraw reserve**, not underlying. The liquidator is the tx `sender` (binary column): `concat('0x', lower(to_hex(sender)))`. |
+| `obligation::ObligationDataEvent` | `bad_debt_usd.value`, `deposited_value_usd.value`, `weighted_borrowed_value_usd.value`, `deposits[]`, `borrows[]` (each with `market_value`) | All `.value` fields /1e18. Read current bad debt straight from `bad_debt_usd`. |
+| `lending_market::ForgiveEvent` | `lending_market_id`, `coin_type.name`, `reserve_id`, `obligation_id`, `liquidity_amount` | `liquidity_amount` is u64 underlying. This is the bad-debt write-off. |
+
+### Suilend protocol-native pricing (the correctness core)
+
+Never hardcode token decimals. Derive USD from the reserve's own `ReserveAssetDataEvent` so the scaling cancels. Two unit systems appear in `LiquidateEvent`, and using the wrong one is the single most error-prone part of Suilend.
+
+Underlying-denominated amounts (debt repaid):
+```sql
+-- supply_amount and supply_amount_usd_estimate are both {value} scaled 1e18, so 1e18 cancels
+repay_amount * (r.supply_amount_usd_estimate_value / r.supply_amount_value) AS debt_repaid_usd
+```
+
+cToken-denominated amounts (seized collateral, protocol fee, liquidator bonus):
+```sql
+-- ctoken_supply is plain u64; supply_amount_usd_estimate_value is 1e18 scaled
+withdraw_amount * ((w.supply_amount_usd_estimate_value / 1e18) / w.ctoken_supply) AS collateral_seized_usd
+```
+
+Suilend's `liquidate()` carves the protocol fee and the liquidator bonus out of the seized cTokens, so fee and bonus use the cTOKEN unit price too. Treating `withdraw_amount` as underlying overstates seized value badly. This is the same share-token rule generalized below.
+
+The full, validated query (one row per `LiquidateEvent`, priced in USD, feeding a materialized view) is `examples/suilend-liquidations-priced.sql` (Dune query 7756564). It is the canonical reference; the excerpts above are teaching fragments only.
+
+### Suilend symbol resolution
+
+Default: `upper(split_part(coin_type, '::', 3))`.
+
+Exception: `::coin::COIN` wrapped tokens collapse to the literal `COIN`, so they need a symbol map keyed by the full hex with no `0x` (the same `::coin::COIN` problem as Navi discovery #6, solved here with a static map instead of a metadata call):
+
+| coin_type hex (no 0x) | symbol |
+|---|---|
+| `5d4b3025...` | wUSDC |
+| `c060...` | wUSDT |
+| `af8c...` | WETH |
+| `b784...` | SOL |
+
+### Suilend data-quality gotcha
+
+Raw `sum(deposited_value_usd)` carries garbage outliers (about $21.2B observed). Do not surface it. The weighted borrowed value (`weighted_borrowed_value_usd`) is sane; use that instead.
+
+### Worked case study: IKA bad debt (thin-token oracle risk)
+
+The only `ForgiveEvent` episode in Suilend history. IKA coin type `0x7262fb2f7a3a14c888c438a3cd9b912469a58cf60f367352c46584262e8299aa::ika::IKA`.
+
+On 2025-09-08 IKA roughly doubled in a day (about $0.038 to $0.0799 VWAP) on a roughly tenfold DEX-volume spike to about $22.4M. Accounts short IKA were liquidated en masse (851 liquidations across 84 obligations cleared about $794K of debt), and the residual the engine could not cover left about $395K written off across 53 obligations. Reconstructed entirely on-chain by joining `dex_sui.trades` (price) to the priced liquidation matview.
+
+Use this as the canonical example of "a borrowed-asset squeeze on a thin token produces bad debt," and of using DEX trades to price an asset that Dune's price tables do not cover. The full query is `examples/suilend-ika-bad-debt.sql` (Dune query 7757951); the `dex_sui.trades` VWAP recipe it uses is documented in `sui-curated-tables.md`.
+
+### Presentation: clickable Sui address cells
+
+When a liquidation or obligation table surfaces account addresses, make the cell link to the account's Suiscan portfolio with Dune's `get_href`:
+```sql
+get_href('https://suiscan.xyz/mainnet/account/' || addr || '/portfolio', addr)
+```
+
+This is the one Sui-specific presentation helper this skill carries. Generic dashboard mechanics (grids, separators, `updateDashboard` semantics) are in the README dashboard companion note, routed to Dune's official skill.
+
+## Share-token vs underlying pricing (cross-protocol)
+
+Lending protocols emit balances in share units, not underlying. Always derive USD-per-share from a supply and a supply-USD pair on the **same object**; never assume one share equals one underlying unit. Two protocols in this skill, one rule:
+
+- **Suilend** uses cTokens, priced via `supply_amount_usd_estimate / ctoken_supply` (see the Suilend pricing core above).
+- **Navi** uses a supply index, where the native amount is `(raw / 1e9) * (current_supply_index / 1e27)` (see Navi "Key technical discoveries" #1).
+
+Skipping the share conversion mis-reports systematically. It is the root of the cToken-as-underlying and supply-index-omission errors recorded in the anti-pattern list (`sui-data-model.md`).
 
 ## Navi Overview & the Three-Package Problem
 
@@ -566,3 +662,5 @@ The narrative for a comparative dashboard:
 - `7528506` — **Navi V9.5.2 historical TVL replay** (90-day daily, end-of-day per reserve, via `sui.objects` + Pyth Benchmarks; matches Navi portal Total Supply within 0.2%)
 - `6852115` — Navi daily new vs returning wallets (legitimate Navi query, demonstrates 3-package union)
 - `6852920` — mementomori "Navi daily TVL by asset" (actually Suilend — see investigation note above)
+- `7756564`: Suilend liquidations priced per event, the materialized-view source (98,081 rows from 2024-03-13; protocol-native cToken-vs-underlying pricing). Standalone: `examples/suilend-liquidations-priced.sql`
+- `7757951`: Suilend IKA bad debt, `dex_sui.trades` VWAP joined to the IKA-debt liquidations (the only `ForgiveEvent` episode). Standalone: `examples/suilend-ika-bad-debt.sql`
