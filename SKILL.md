@@ -11,6 +11,10 @@ Before writing any query, read `references/sui-data-model.md` for the table cata
 
 For pricing any Sui asset, lead with protocol-emitted USD, then `dex_sui.trades` VWAP for tokens with no oracle feed, then Pyth; do not assume `prices.*` covers Sui (see `references/sui-data-model.md` § Pricing). To check a priced query or build a serving layer, read `references/verification-toolkit.md` and the materialized-view section in `references/sui-data-model.md`.
 
+## Data freshness: numbers in these docs are snapshots, not cache
+
+This skill queries Sui live through the Dune MCP. Every specific number written in these reference files (row counts, credit costs, TVL, bad debt, penalty ratios) is an illustrative snapshot from when that example was run, never a cached value to reuse. When a task needs a current figure, run the query and read the result; do not quote the docs. This applies to the verification toolkit too: the raw-events recount and the stablecoin and penalty cross-checks are procedures to re-run, not results to copy.
+
 ## Task Router
 
 Determine which mode applies based on the user's request:

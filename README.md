@@ -23,7 +23,7 @@ Built using this skill in a single weekend:
 - 15 visualizations, both protocols, fully on-chain
 - 100% asset coverage on Navi's lending protocol — no third-party indexer
 - The on-chain pipeline below — pure SQL + Sui RPC + Navi's on-chain oracle (V0.3: all 4 markets, 48 reserves), refreshes every execution
-- Suilend liquidations (98,081 events from 2024-03-13) priced with protocol-native cToken USD, and the IKA bad-debt episode reconstructed on-chain (V0.4: the two `examples/suilend-*.sql`)
+- Suilend liquidations priced with protocol-native cToken USD (98,081 events at the example run on 2026-06-19, an illustrative snapshot rather than a live count), and the IKA bad-debt episode reconstructed on-chain (V0.4: the two `examples/suilend-*.sql`)
 
 ## Architecture: the on-chain pipeline (V9 — multi-market)
 

@@ -162,7 +162,7 @@ Beyond the state/activity events above, three events carry the liquidation and b
 | Event | Key fields | Notes |
 |---|---|---|
 | `lending_market::LiquidateEvent` | `lending_market_id`, `repay_reserve_id`, `withdraw_reserve_id`, `obligation_id`, `repay_coin_type.name`, `withdraw_coin_type.name`, `repay_amount`, `withdraw_amount`, `protocol_fee_amount`, `liquidator_bonus_amount` | `repay_amount` is u64 in the repaid asset's underlying. `withdraw_amount`, `protocol_fee_amount`, `liquidator_bonus_amount` are u64 in **cTokens of the withdraw reserve**, not underlying. The liquidator is the tx `sender` (binary column): `concat('0x', lower(to_hex(sender)))`. |
-| `obligation::ObligationDataEvent` | `bad_debt_usd.value`, `deposited_value_usd.value`, `weighted_borrowed_value_usd.value`, `deposits[]`, `borrows[]` (each with `market_value`) | All `.value` fields /1e18. Read current bad debt straight from `bad_debt_usd`. |
+| `obligation::ObligationDataEvent` | `bad_debt_usd.value`, `deposited_value_usd.value`, `weighted_borrowed_value_usd.value`, `deposits[]`, `borrows[]` (each with `market_value`) | All `.value` fields /1e18. Read bad debt straight from `bad_debt_usd` at query time; it is a live per-run read, not a figure to quote from these docs. |
 | `lending_market::ForgiveEvent` | `lending_market_id`, `coin_type.name`, `reserve_id`, `obligation_id`, `liquidity_amount` | `liquidity_amount` is u64 underlying. This is the bad-debt write-off. |
 
 ### Suilend protocol-native pricing (the correctness core)
@@ -200,13 +200,13 @@ Exception: `::coin::COIN` wrapped tokens collapse to the literal `COIN`, so they
 
 ### Suilend data-quality gotcha
 
-Raw `sum(deposited_value_usd)` carries garbage outliers (about $21.2B observed). Do not surface it. The weighted borrowed value (`weighted_borrowed_value_usd`) is sane; use that instead.
+Raw `sum(deposited_value_usd)` carries garbage outliers (the example run, 2026-06-19, showed about $21.2B). Do not surface it. The weighted borrowed value (`weighted_borrowed_value_usd`) is sane; use that instead. Treat the figure as illustrative, not a standing total: re-run to read the current sum.
 
 ### Worked case study: IKA bad debt (thin-token oracle risk)
 
 The only `ForgiveEvent` episode in Suilend history. IKA coin type `0x7262fb2f7a3a14c888c438a3cd9b912469a58cf60f367352c46584262e8299aa::ika::IKA`.
 
-On 2025-09-08 IKA roughly doubled in a day (about $0.038 to $0.0799 VWAP) on a roughly tenfold DEX-volume spike to about $22.4M. Accounts short IKA were liquidated en masse (851 liquidations across 84 obligations cleared about $794K of debt), and the residual the engine could not cover left about $395K written off across 53 obligations. Reconstructed entirely on-chain by joining `dex_sui.trades` (price) to the priced liquidation matview.
+As reconstructed in the example run (2026-06-19): on 2025-09-08 IKA roughly doubled in a day (about $0.038 to $0.0799 VWAP) on a roughly tenfold DEX-volume spike to about $22.4M. Accounts short IKA were liquidated en masse (851 liquidations across 84 obligations cleared about $794K of debt), and the residual the engine could not cover left about $395K written off across 53 obligations. These figures are an illustrative snapshot of that episode from the example query, not a live total. The reconstruction joins `dex_sui.trades` (price) to the priced liquidation matview entirely on-chain.
 
 Use this as the canonical example of "a borrowed-asset squeeze on a thin token produces bad debt," and of using DEX trades to price an asset that Dune's price tables do not cover. The full query is `examples/suilend-ika-bad-debt.sql` (Dune query 7757951); the `dex_sui.trades` VWAP recipe it uses is documented in `sui-curated-tables.md`.
 
@@ -662,5 +662,5 @@ The narrative for a comparative dashboard:
 - `7528506` — **Navi V9.5.2 historical TVL replay** (90-day daily, end-of-day per reserve, via `sui.objects` + Pyth Benchmarks; matches Navi portal Total Supply within 0.2%)
 - `6852115` — Navi daily new vs returning wallets (legitimate Navi query, demonstrates 3-package union)
 - `6852920` — mementomori "Navi daily TVL by asset" (actually Suilend — see investigation note above)
-- `7756564`: Suilend liquidations priced per event, the materialized-view source (98,081 rows from 2024-03-13; protocol-native cToken-vs-underlying pricing). Standalone: `examples/suilend-liquidations-priced.sql`
+- `7756564`: Suilend liquidations priced per event, the materialized-view source (98,081 rows at the example run on 2026-06-19, history from 2024-03-13; protocol-native cToken-vs-underlying pricing). Standalone: `examples/suilend-liquidations-priced.sql`
 - `7757951`: Suilend IKA bad debt, `dex_sui.trades` VWAP joined to the IKA-debt liquidations (the only `ForgiveEvent` episode). Standalone: `examples/suilend-ika-bad-debt.sql`

@@ -500,7 +500,7 @@ When a query does one expensive priced pass over events (decode, join to reserve
 
 Reality to document honestly:
 
-- **Creation is not free.** A matview needs the `medium` execution tier. The Suilend matview cost about 117 credits to build. Do not quote small-tier prices for it.
+- **Creation is not free.** A matview needs the `medium` execution tier. The Suilend matview cost about 117 credits to build in the example run; treat that as an order-of-magnitude snapshot, not a fixed price. Do not quote small-tier prices for it.
 - **No automatic refresh** unless you set a cron. A refresh re-runs the full upstream priced pass and re-costs roughly the same as the first build.
 - **Gate before you materialize:** `createDuneQuery(is_temp=false)` -> `executeQueryById` -> `getExecutionResults` -> validate against ground truth (see the verification toolkit) -> `createMaterializedView`.
 
@@ -607,9 +607,9 @@ Lending protocols emit balances in share units (Suilend cTokens, Navi supply-ind
 
 ### Anti-pattern 10: Using `seized_usd / repaid_usd` as the liquidation penalty
 
-Collateral is oracle-valued on daily snapshots that lag intraday cascade prices, so the aggregate seized-USD / repaid-USD ratio runs near 1.2 all-time (about 1.197) and overstates the penalty.
+Collateral is oracle-valued on daily snapshots that lag intraday cascade prices, so the aggregate seized-USD / repaid-USD ratio runs near 1.2 all-time (the example run on 2026-06-19 showed about 1.197) and overstates the penalty.
 
-**Do instead:** compute the realized penalty from price-independent cToken quantity proportions (about 6%). See the verification toolkit, check 3.
+**Do instead:** compute the realized penalty from price-independent cToken quantity proportions (about 6% in that same run). These figures are illustrative of the example run, not standing values; see the verification toolkit, check 3.
 
 ### Anti-pattern 11: Assuming `prices.*` covers Sui
 
@@ -633,5 +633,5 @@ A `query_<id>` reference does not cache. It re-executes the upstream SQL as a CT
 
 - **`http_post` in a CTE referenced more than once re-fires the LiveFetch call**, hitting per-query HTTP caps. Linearize to single-reference CTEs. Full write-up in `protocol-patterns.md` § "Key technical discoveries" #9.
 - **Batch JSON-RPC 2.0 on Mysten's public RPC is rejected** with `-32005`; there is no batch workaround on the public endpoint. See `protocol-patterns.md` § "V0.2 — Historical replay".
-- **Surfacing raw outlier-laden sums** (Suilend's raw `deposited_value_usd` reaches about $21.2B) produces garbage. Guard outliers or use a weighted field. Detail in `protocol-patterns.md` § Suilend data-quality gotcha.
+- **Surfacing raw outlier-laden sums** (Suilend's raw `deposited_value_usd` reached about $21.2B in the example run, an illustrative figure to re-check, not a standing total) produces garbage. Guard outliers or use a weighted field. Detail in `protocol-patterns.md` § Suilend data-quality gotcha.
 - **Setting duplicate-x aggregation (Sum vs Pick first) via the API** is not supported and has caused a TVL undercount; set it in the Dune UI. This is a dashboard mechanic, covered in the README dashboard companion note.
