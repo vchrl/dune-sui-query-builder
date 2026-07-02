@@ -629,6 +629,12 @@ A `query_<id>` reference does not cache. It re-executes the upstream SQL as a CT
 
 **Do instead:** probe with `createDuneQuery` + `getExecutionResults` for schema discovery, as done for the `sui_tvl.*_gold` intermediates in `sui-curated-tables.md`.
 
+### Anti-pattern 14: Pricing discrete events off the day's last reserve snapshot
+
+Valuing a liquidation, seizure, fee, bonus, or repay off the reserve's *last* `ReserveAssetDataEvent` of the calendar day (joined on `date`) misprices every event on a volatile day. On 2025-09-08 this understated cleared IKA debt 6.14x ($794K vs $4.88M) and overstated book-wide seized collateral ~9% (up to ~27% on crash days like 2025-10-10); calm days are unaffected, so it hides.
+
+**Do instead:** price at the reserve's `ReserveAssetDataEvent` inside the *same transaction*, joining on `transaction_digest` (plus `reserve_id`). Suilend refreshes both reserves inside every liquidation tx (100% same-tx coverage, no fallback). Per-day snapshots are correct only for daily TVL/state time-series, never for valuing individual events. See `protocol-patterns.md` § "Suilend protocol-native pricing".
+
 ### Already documented elsewhere (do not duplicate)
 
 - **`http_post` in a CTE referenced more than once re-fires the LiveFetch call**, hitting per-query HTTP caps. Linearize to single-reference CTEs. Full write-up in `protocol-patterns.md` § "Key technical discoveries" #9.

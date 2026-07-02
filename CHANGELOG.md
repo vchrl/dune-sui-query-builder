@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [0.4.1] - 2026-07-02
+
+Correctness fix: price Suilend discrete events at the same-transaction reserve mark, not the day's last snapshot.
+
+### Fixed
+- **Suilend liquidation pricing** (`examples/suilend-liquidations-priced.sql`): the `reserve_snap` CTE and its two joins now key on `transaction_digest` (plus `reserve_id`) instead of `date`, pricing each liquidation at the `ReserveAssetDataEvent` inside its own transaction rather than the reserve's last event of the calendar day. Suilend refreshes both the repay and withdraw reserve inside every `liquidate()` tx, so same-transaction coverage is 100% across all historical liquidations on both reserves — no fallback needed. End-of-day pricing understated cleared IKA debt 6.14x on the volatile 2025-09-08 episode ($794K vs $4.88M) and overstated book-wide seized collateral ~9% (up to ~27% on crash days like 2025-10-10). Null-not-zero handling is unchanged: a missing same-tx price stays null and flagged. Matches the corrected live query 7756564 (corrected book totals: $89.22M debt repaid, $94.60M collateral seized).
+
+### Changed
+- **`references/protocol-patterns.md`**: corrected the `ReserveAssetDataEvent` cadence note (fires hourly per asset **and** in every reserve-touching transaction, including every liquidation, with 100% same-tx coverage on both reserves); added the same-transaction pricing rule to the Suilend pricing core with the IKA 6.14x / ~9% / ~27% cautionary measures.
+- **`references/sui-data-model.md`**: new anti-pattern 14 — pricing discrete events off the day's last reserve snapshot instead of the same-transaction mark.
+
 ## [0.4.0] - 2026-06-21
 
 Suilend protocol pack, share-token pricing as a general rule, a materialized-view serving layer, `dex_sui.trades` as the long-tail price source, and a verification toolkit.

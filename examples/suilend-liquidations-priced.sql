@@ -13,7 +13,9 @@
 
 -- Suilend realized liquidations, one row per LiquidateEvent, priced in USD.
 -- Package 0xf95b06141ed4a174f239417323bde3f209b972f5930d8521ea38a52aff3a6ddf
--- Pricing is protocol-native: each reserve's own supply_amount_usd_estimate gives
+-- Pricing is protocol-native and priced at the SAME-TRANSACTION reserve mark (not the day's
+-- last snapshot): Suilend refreshes both the repay and withdraw reserve inside every liquidate()
+-- tx, so each reserve's own supply_amount_usd_estimate from that same transaction_digest gives
 --   USD per underlying base unit  = supply_amount_usd_estimate / supply_amount   (debt side)
 --   USD per cTOKEN base unit      = (supply_amount_usd_estimate / 1e18) / ctoken_supply  (collateral/fee/bonus side)
 -- repay_amount is underlying base units; withdraw/fee/bonus are cTOKEN base units (Suilend liquidate() carves
@@ -39,16 +41,16 @@ liq AS (
     AND event_type = '0xf95b06141ed4a174f239417323bde3f209b972f5930d8521ea38a52aff3a6ddf::lending_market::LiquidateEvent'
 ),
 reserve_snap AS (
-  SELECT reserve_id, day, usd_per_underlying_base, usd_per_ctoken_base FROM (
+  SELECT transaction_digest, reserve_id, usd_per_underlying_base, usd_per_ctoken_base FROM (
     SELECT
+      transaction_digest,
       json_extract_scalar(event_json, '$.reserve_id') AS reserve_id,
-      date AS day,
       try_cast(json_extract_scalar(event_json, '$.supply_amount_usd_estimate.value') AS double)
         / nullif(try_cast(json_extract_scalar(event_json, '$.supply_amount.value') AS double), 0) AS usd_per_underlying_base,
       (try_cast(json_extract_scalar(event_json, '$.supply_amount_usd_estimate.value') AS double) / 1e18)
         / nullif(try_cast(json_extract_scalar(event_json, '$.ctoken_supply') AS double), 0) AS usd_per_ctoken_base,
-      ROW_NUMBER() OVER (PARTITION BY json_extract_scalar(event_json, '$.reserve_id'), date
-                         ORDER BY timestamp_ms DESC, event_index DESC) AS rn
+      ROW_NUMBER() OVER (PARTITION BY transaction_digest, json_extract_scalar(event_json, '$.reserve_id')
+                         ORDER BY event_index ASC) AS rn
     FROM sui.events
     WHERE date >= DATE '2024-03-01'
       AND event_type = '0xf95b06141ed4a174f239417323bde3f209b972f5930d8521ea38a52aff3a6ddf::reserve::ReserveAssetDataEvent'
@@ -75,8 +77,8 @@ priced AS (
     l.protocol_fee_amount     * rw.usd_per_ctoken_base     AS protocol_fee_usd,
     l.liquidator_bonus_amount * rw.usd_per_ctoken_base     AS liquidator_bonus_usd
   FROM liq l
-  LEFT JOIN reserve_snap rr ON rr.reserve_id = l.repay_reserve_id    AND rr.day = l.day
-  LEFT JOIN reserve_snap rw ON rw.reserve_id = l.withdraw_reserve_id AND rw.day = l.day
+  LEFT JOIN reserve_snap rr ON rr.transaction_digest = l.transaction_digest AND rr.reserve_id = l.repay_reserve_id
+  LEFT JOIN reserve_snap rw ON rw.transaction_digest = l.transaction_digest AND rw.reserve_id = l.withdraw_reserve_id
   LEFT JOIN symbol_map  smw ON smw.coin_type = l.withdraw_coin_type
   LEFT JOIN symbol_map  smr ON smr.coin_type = l.repay_coin_type
 )

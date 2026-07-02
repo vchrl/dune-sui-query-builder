@@ -63,7 +63,7 @@ Join events on `reserve_id` (the reserve object id), not on a coin symbol. The s
 - USD and decimal fields are wrapped as `{ value: ... }` and scaled by 1e18.
 
 State events (TVL, rates, available liquidity):
-- `<pkg>::reserve::ReserveAssetDataEvent` — emitted ~hourly per asset, contains pre-computed USD estimates
+- `<pkg>::reserve::ReserveAssetDataEvent` — fires hourly per asset **and inside every reserve-touching transaction, including every liquidation** (Suilend refreshes both the repay and withdraw reserve within each `liquidate()`). Contains pre-computed USD estimates. Same-transaction coverage is 100% across all historical liquidations on both reserves, so a same-transaction price join needs no fallback.
 
 Activity events (deposit, borrow, withdraw, repay, liquidate):
 - `<pkg>::lending_market::DepositEvent`
@@ -182,6 +182,8 @@ withdraw_amount * ((w.supply_amount_usd_estimate_value / 1e18) / w.ctoken_supply
 ```
 
 Suilend's `liquidate()` carves the protocol fee and the liquidator bonus out of the seized cTokens, so fee and bonus use the cTOKEN unit price too. Treating `withdraw_amount` as underlying overstates seized value badly. This is the same share-token rule generalized below.
+
+**Price at the same-transaction reserve mark, never the day's last event.** To value any discrete event — liquidations, seizures, fees, bonuses, repays — price at the reserve's `ReserveAssetDataEvent` emitted *inside the same transaction*, joining on `transaction_digest` (plus `reserve_id`). Do **not** join the last reserve event of the calendar day on `date`. Suilend refreshes both the repay and withdraw reserve inside every liquidation tx, so same-transaction coverage is 100% across all historical liquidations on both reserves — no fallback needed. Per-day snapshots are correct only for daily TVL/state time-series (the daily-TVL pattern above); they are never correct for valuing individual events. Cautionary measure: on the volatile 2025-09-08 IKA episode, end-of-day pricing understated cleared IKA debt **6.14x** ($794K vs $4.88M) and overstated book-wide seized collateral **~9%** (up to **~27%** on crash days like 2025-10-10); calm days are unaffected, which is exactly why the bug hides.
 
 The full, validated query (one row per `LiquidateEvent`, priced in USD, feeding a materialized view) is `examples/suilend-liquidations-priced.sql` (Dune query 7756564). It is the canonical reference; the excerpts above are teaching fragments only.
 
